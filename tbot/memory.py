@@ -60,6 +60,37 @@ class UserSummary:
         )
 
 
+@dataclass
+class ChatStatistics:
+    """Runtime statistics for a chat."""
+    replies: int = 0
+    reactions: int = 0
+    llm_calls: int = 0
+    tokens_sent: int = 0
+    tokens_received: int = 0
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for JSON storage."""
+        return {
+            "replies": self.replies,
+            "reactions": self.reactions,
+            "llm_calls": self.llm_calls,
+            "tokens_sent": self.tokens_sent,
+            "tokens_received": self.tokens_received,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ChatStatistics":
+        """Deserialize from dictionary."""
+        return cls(
+            replies=data.get("replies", 0),
+            reactions=data.get("reactions", 0),
+            llm_calls=data.get("llm_calls", 0),
+            tokens_sent=data.get("tokens_sent", 0),
+            tokens_received=data.get("tokens_received", 0),
+        )
+
+
 class MemoryManager:
     """Store persona memories and recent chat messages per chat."""
 
@@ -83,6 +114,7 @@ class MemoryManager:
         self._history_size = history_size
         self._summarization_count: Dict[int, int] = {}
         self._user_summaries: Dict[int, Dict[str, UserSummary]] = {}  # chat_id -> {username -> UserSummary}
+        self._statistics: Dict[int, ChatStatistics] = {}  # chat_id -> ChatStatistics
         self._max_summarized_users = max_summarized_users
         self._storage_path = Path(storage_path or Path.home() / ".tbot-data.json")
         self._auto_save = auto_save
@@ -272,6 +304,60 @@ class MemoryManager:
             f"kept {self._max_summarized_users} most recent users"
         )
 
+    def increment_reply_count(self, chat_id: int) -> None:
+        """Increment the reply count for a chat.
+
+        Args:
+            chat_id: The chat to increment
+        """
+        stats = self._statistics.setdefault(chat_id, ChatStatistics())
+        stats.replies += 1
+        self._mark_dirty()
+
+    def increment_reaction_count(self, chat_id: int) -> None:
+        """Increment the reaction count for a chat.
+
+        Args:
+            chat_id: The chat to increment
+        """
+        stats = self._statistics.setdefault(chat_id, ChatStatistics())
+        stats.reactions += 1
+        self._mark_dirty()
+
+    def increment_llm_call_count(self, chat_id: int, tokens_sent: int = 0, tokens_received: int = 0) -> None:
+        """Increment the LLM call count and token counts for a chat.
+
+        Args:
+            chat_id: The chat to increment
+            tokens_sent: Number of tokens sent in the request
+            tokens_received: Number of tokens received in the response
+        """
+        stats = self._statistics.setdefault(chat_id, ChatStatistics())
+        stats.llm_calls += 1
+        stats.tokens_sent += tokens_sent
+        stats.tokens_received += tokens_received
+        self._mark_dirty()
+
+    def get_statistics(self, chat_id: int) -> ChatStatistics:
+        """Get statistics for a chat.
+
+        Args:
+            chat_id: The chat to get statistics for
+
+        Returns:
+            Chat statistics object
+        """
+        return self._statistics.get(chat_id, ChatStatistics())
+
+    def clear_statistics(self, chat_id: int) -> None:
+        """Clear all statistics for a chat.
+
+        Args:
+            chat_id: The chat to clear statistics for
+        """
+        self._statistics.pop(chat_id, None)
+        self._mark_dirty()
+
     def _mark_dirty(self) -> None:
         """Mark data as changed and trigger auto-save if enabled."""
         self._dirty = True
@@ -303,12 +389,18 @@ class MemoryManager:
                     for username, summary in summaries.items()
                 }
 
+            # Convert statistics to serializable format
+            statistics_data = {}
+            for chat_id, stats in self._statistics.items():
+                statistics_data[str(chat_id)] = stats.to_dict()
+
             data = {
-                "version": 2,  # Increment version for user summaries support
+                "version": 3,  # Increment version for statistics support
                 "memories": memories_data,
                 "history": history_data,
                 "summarization_count": summarization_data,
                 "user_summaries": user_summaries_data,
+                "statistics": statistics_data,
             }
 
             # Write atomically using a temp file
@@ -335,7 +427,7 @@ class MemoryManager:
 
             # Validate version (for future migrations)
             version = data.get("version", 1)
-            if version not in [1, 2]:
+            if version not in [1, 2, 3]:
                 logger.warning(f"Unknown data version {version}, skipping load")
                 return
 
@@ -367,12 +459,20 @@ class MemoryManager:
                         for username, summary_data in summaries_data.items()
                     }
 
+            # Load statistics (version 3+)
+            self._statistics = {}
+            if version >= 3:
+                for chat_id_str, stats_data in data.get("statistics", {}).items():
+                    chat_id = int(chat_id_str)
+                    self._statistics[chat_id] = ChatStatistics.from_dict(stats_data)
+
             self._dirty = False
             logger.info(
                 f"Loaded data from {self._storage_path} (version {version}): "
                 f"{len(self._memories)} chats with memories, "
                 f"{len(self._history)} chats with history, "
-                f"{len(self._user_summaries)} chats with user summaries"
+                f"{len(self._user_summaries)} chats with user summaries, "
+                f"{len(self._statistics)} chats with statistics"
             )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse saved data: {e}", exc_info=True)

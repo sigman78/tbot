@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
-import asyncio
 import logging
 import os
 import sys
+
+import click
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -23,52 +23,47 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments.
+@click.command()
+@click.option(
+    "--token",
+    envvar="TELEGRAM_BOT_TOKEN",
+    required=True,
+    help="Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)",
+)
+@click.option(
+    "--api-key",
+    envvar="API_KEY",
+    required=True,
+    help="OpenRouter-compatible API key (or set API_KEY env var)",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose (DEBUG) logging",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable raw LLM request logging to llm_requests.log",
+)
+def main(token: str, api_key: str, verbose: bool, debug: bool) -> None:
+    """Run the persona Telegram bot."""
+    from .bot import run
+    from .llm_client import set_debug_logging
 
-    Returns:
-        Parsed arguments namespace
-    """
-    parser = argparse.ArgumentParser(description="Run the persona Telegram bot")
-    parser.add_argument(
-        "--token",
-        default=os.getenv("TELEGRAM_BOT_TOKEN"),
-        help="Telegram bot token (or set TELEGRAM_BOT_TOKEN env var)",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=os.getenv("API_KEY"),
-        help="OpenRouter-compatible API key (or set API_KEY env var)",
-    )
-    parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose (DEBUG) logging",
-    )
-    return parser.parse_args()
+    setup_logging(verbose=verbose)
 
-
-def main() -> None:
-    """Main entry point for the bot application."""
-    from .bot import run, run_polling
-
-    args = parse_args()
-    setup_logging(verbose=args.verbose)
+    # Configure LLM debug logging
+    set_debug_logging(debug)
 
     logger = logging.getLogger(__name__)
     logger.info("Starting Telegram persona bot...")
-
-    if not args.token:
-        raise SystemExit(
-            "Telegram bot token is required. Use --token or TELEGRAM_BOT_TOKEN."
-        )
-    if not args.api_key:
-        raise SystemExit("API key is required. Use --api-key or API_KEY.")
+    if debug:
+        logger.info("LLM request logging enabled (llm_requests.log)")
 
     try:
-        # asyncio.run(run_polling(args.token, api_key=args.api_key))
-        run(args.token, api_key=args.api_key)
+        run(token, api_key=api_key)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
