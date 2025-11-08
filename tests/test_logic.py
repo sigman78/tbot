@@ -49,3 +49,39 @@ def test_should_respond_group_chat_respects_frequency() -> None:
         random_value=0.05, response_frequency=0.1, replied_to_bot=False, is_private_chat=False
     )
 
+
+def test_should_respond_when_mentioned_in_group() -> None:
+    """Test that bot always responds when mentioned in a group chat."""
+    # Even with low frequency and high random value, should respond when mentioned
+    assert should_respond(
+        random_value=0.99,
+        response_frequency=0.01,
+        replied_to_bot=False,
+        is_private_chat=False,
+        mentioned_bot=True,
+    )
+
+
+def test_should_respond_when_mentioned_in_private() -> None:
+    """Test that bot responds when mentioned in private chat."""
+    # Should respond in private chat regardless, but mentioned flag should still work
+    assert should_respond(
+        random_value=0.5,
+        response_frequency=0.5,
+        replied_to_bot=False,
+        is_private_chat=True,
+        mentioned_bot=True,
+    )
+
+
+def test_should_respond_mention_overrides_low_frequency() -> None:
+    """Test that mentioning the bot overrides low frequency setting."""
+    # With zero frequency, should still respond when mentioned
+    assert should_respond(
+        random_value=0.9,
+        response_frequency=0.0,
+        replied_to_bot=False,
+        is_private_chat=False,
+        mentioned_bot=True,
+    )
+

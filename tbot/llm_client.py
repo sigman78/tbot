@@ -14,6 +14,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from .config import BotConfig
 from .const import TG_REACTIONS as COMMON_REACTIONS
+from .context import ConversationContextBuilder
 from .memory import MemoryEntry
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class LLMClient:
         history: Iterable[str],
         memories: Iterable[MemoryEntry],
         user_message: str,
+        is_group_chat: bool = False,
     ) -> str:
         """Generate a reply using the configured LLM.
 
@@ -91,6 +93,7 @@ class LLMClient:
             history: Recent conversation history
             memories: Stored memories for the persona
             user_message: The user's current message
+            is_group_chat: Whether this is a group chat (affects user name handling)
 
         Returns:
             Generated reply text
@@ -102,32 +105,14 @@ class LLMClient:
         if not user_message or not user_message.strip():
             raise ValueError("user_message cannot be empty")
 
-        system = f"{config.system_prompt}\nPersona: {config.persona}"
-        memory_lines = [f"- {entry.text}" for entry in memories]
-        memory_blob = "\n".join(memory_lines) if memory_lines else "None"
-
-        messages: List[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system},
-            {
-                "role": "system",
-                "content": (f"Relevant persona memories (optional):\n{memory_blob}"),
-            },
-        ]
-        for item in history:
-            if item.startswith("Bot: "):
-                # Process bot messages - strip the "Bot:" prefix
-                clean_content = item[5:]  # Remove "Bot: " prefix
-                messages.append({"role": "assistant", "content": clean_content})
-            else:
-                # Process user messages - strip any user prefix like "User: "
-                content = item
-                if ": " in content:
-                    parts = content.split(": ", 1)
-                    if len(parts) > 1:
-                        content = parts[1]  # Take only the message part
-                messages.append({"role": "user", "content": content})
-
-        messages.append({"role": "user", "content": user_message})
+        # Use the centralized context builder
+        context_builder = ConversationContextBuilder(is_group_chat=is_group_chat)
+        messages = context_builder.build_messages(
+            config=config,
+            history=list(history),
+            memories=list(memories),
+            current_message=user_message,
+        )
 
         logger.debug(
             f"Generating reply with model {config.llm_model}, "

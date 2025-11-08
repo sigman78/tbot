@@ -19,6 +19,7 @@ from telegram.ext import (
 )
 
 from .config import BotConfig, ConfigManager
+from .context import ConversationContextBuilder
 from .llm_client import LLMClient
 from .logic import should_respond
 from .memory import MemoryManager
@@ -138,9 +139,7 @@ async def _maybe_auto_summarize(
         )
 
         # Add summary to memories - ensure no unexpected formatting issues
-        clean_summary = summary
-        if clean_summary.startswith("Bot: "):
-            clean_summary = clean_summary[5:]  # Remove any unexpected "Bot:" prefix
+        clean_summary = ConversationContextBuilder.strip_bot_prefix(summary)
         memory_manager.add_memory(chat_id, f"[Auto-summary]: {clean_summary}")
 
         # Clear the summarized messages from history
@@ -284,7 +283,7 @@ def create_application(
             user_name = update.effective_user.first_name
         memory_manager.append_history(
             chat_id,
-            f"{user_name}: {text}",
+            ConversationContextBuilder.format_user_message(user_name, text),
         )
 
         config = config_manager.config
@@ -377,6 +376,7 @@ def create_application(
                 history=history,
                 memories=memories,
                 user_message=text,
+                is_group_chat=not is_private_chat,
             )
             # Check if we can send messages in this chat (for groups)
             can_send_messages = True
@@ -400,9 +400,7 @@ def create_application(
 
             if can_send_messages:
                 # Make sure the response doesn't contain the "Bot:" prefix
-                clean_reply = reply
-                if clean_reply.startswith("Bot: "):
-                    clean_reply = clean_reply[5:]  # Remove "Bot: " prefix
+                clean_reply = ConversationContextBuilder.strip_bot_prefix(reply)
 
                 # Send the clean reply
                 await message.reply_text(
@@ -411,7 +409,10 @@ def create_application(
                 )
 
                 # Store full reply in history with prefix (for proper history processing)
-                memory_manager.append_history(chat_id, f"Bot: {clean_reply}")
+                memory_manager.append_history(
+                    chat_id,
+                    ConversationContextBuilder.format_bot_message(clean_reply),
+                )
                 logger.info(f"Successfully replied to message in chat {chat_id}")
             else:
                 logger.warning(
