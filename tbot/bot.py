@@ -386,7 +386,8 @@ def create_application(
                         text=(
                             "👋 Hello! I've been added to this group.\n\n"
                             "React to this message with a positive reaction (👍, ❤️, etc.) to opt-in to interactions with me.\n\n"
-                            "Users who opt-in will be able to interact with me in this group chat."
+                            "⚠️ Privacy: I will have access only to messages of users who agreed to opt-in. "
+                            "Messages from users who don't opt-in will not be read, stored, or processed by me."
                         )
                     )
 
@@ -460,7 +461,8 @@ def create_application(
         # Send opt-in request message
         optin_message = await message.reply_text(
             "👋 React to this message with a positive reaction (👍, ❤️, etc.) to opt-in to interactions with this bot.\n\n"
-            "Users who opt-in will be able to interact with the bot in this group chat."
+            "⚠️ Privacy: I will have access only to messages of users who agreed to opt-in. "
+            "Messages from users who don't opt-in will not be read, stored, or processed by me."
         )
 
         # Store the message ID for tracking reactions
