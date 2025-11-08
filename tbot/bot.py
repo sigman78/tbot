@@ -7,7 +7,7 @@ import logging
 import os
 import random
 
-from telegram import ChatMemberUpdated, Message, Update
+from telegram import Message, Update
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
 from telegram.ext import (
     Application,
