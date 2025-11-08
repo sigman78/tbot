@@ -35,6 +35,31 @@ class MemoryEntry:
         )
 
 
+@dataclass
+class UserSummary:
+    """Per-user conversation summary."""
+    username: str
+    summary: str
+    last_active: datetime
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for JSON storage."""
+        return {
+            "username": self.username,
+            "summary": self.summary,
+            "last_active": self.last_active.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "UserSummary":
+        """Deserialize from dictionary."""
+        return cls(
+            username=data["username"],
+            summary=data["summary"],
+            last_active=datetime.fromisoformat(data["last_active"]),
+        )
+
+
 class MemoryManager:
     """Store persona memories and recent chat messages per chat."""
 
@@ -43,6 +68,7 @@ class MemoryManager:
         history_size: int = 20,
         storage_path: Path | str | None = None,
         auto_save: bool = True,
+        max_summarized_users: int = 10,
     ) -> None:
         """Initialize the memory manager.
 
@@ -50,11 +76,14 @@ class MemoryManager:
             history_size: Maximum number of messages to keep in history
             storage_path: Path to persistence file (default: ~/.tbot-data.json)
             auto_save: Whether to auto-save after changes
+            max_summarized_users: Maximum number of users to keep summaries for
         """
         self._memories: Dict[int, List[MemoryEntry]] = {}
         self._history: Dict[int, List[str]] = {}
         self._history_size = history_size
         self._summarization_count: Dict[int, int] = {}
+        self._user_summaries: Dict[int, Dict[str, UserSummary]] = {}  # chat_id -> {username -> UserSummary}
+        self._max_summarized_users = max_summarized_users
         self._storage_path = Path(storage_path or Path.home() / ".tbot-data.json")
         self._auto_save = auto_save
         self._dirty = False  # Track if data has changed since last save
@@ -165,6 +194,84 @@ class MemoryManager:
         """
         return len(self._history.get(chat_id, []))
 
+    def add_user_summary(
+        self, chat_id: int, username: str, summary: str
+    ) -> None:
+        """Add or update a user's conversation summary.
+
+        Args:
+            chat_id: The chat this summary belongs to
+            username: The user's name
+            summary: The summary text
+        """
+        if chat_id not in self._user_summaries:
+            self._user_summaries[chat_id] = {}
+
+        self._user_summaries[chat_id][username] = UserSummary(
+            username=username,
+            summary=summary,
+            last_active=datetime.utcnow(),
+        )
+
+        # Enforce max user limit
+        self._cleanup_old_user_summaries(chat_id)
+        self._mark_dirty()
+
+    def get_user_summaries(self, chat_id: int) -> List[UserSummary]:
+        """Get all user summaries for a chat, ordered by last active.
+
+        Args:
+            chat_id: The chat to get summaries for
+
+        Returns:
+            List of user summaries, most recently active first
+        """
+        summaries = self._user_summaries.get(chat_id, {})
+        return sorted(
+            summaries.values(),
+            key=lambda s: s.last_active,
+            reverse=True,
+        )
+
+    def clear_user_summaries(self, chat_id: int) -> None:
+        """Clear all user summaries for a chat.
+
+        Args:
+            chat_id: The chat to clear summaries for
+        """
+        self._user_summaries.pop(chat_id, None)
+        self._mark_dirty()
+
+    def _cleanup_old_user_summaries(self, chat_id: int) -> None:
+        """Remove oldest user summaries if limit exceeded.
+
+        Args:
+            chat_id: The chat to clean up
+        """
+        if chat_id not in self._user_summaries:
+            return
+
+        summaries = self._user_summaries[chat_id]
+        if len(summaries) <= self._max_summarized_users:
+            return
+
+        # Sort by last_active, keep only the most recent N users
+        sorted_summaries = sorted(
+            summaries.items(),
+            key=lambda item: item[1].last_active,
+            reverse=True,
+        )
+
+        # Keep only the top N users
+        self._user_summaries[chat_id] = dict(
+            sorted_summaries[:self._max_summarized_users]
+        )
+
+        logger.info(
+            f"Cleaned up user summaries for chat {chat_id}, "
+            f"kept {self._max_summarized_users} most recent users"
+        )
+
     def _mark_dirty(self) -> None:
         """Mark data as changed and trigger auto-save if enabled."""
         self._dirty = True
@@ -174,7 +281,7 @@ class MemoryManager:
     def save(self) -> None:
         """Save all data to disk.
 
-        Persists memories, history, and summarization counts for all chats.
+        Persists memories, history, summarization counts, and user summaries for all chats.
         """
         try:
             # Convert memories to serializable format
@@ -188,11 +295,20 @@ class MemoryManager:
             # Convert summarization counts to serializable format
             summarization_data = {str(k): v for k, v in self._summarization_count.items()}
 
+            # Convert user summaries to serializable format
+            user_summaries_data = {}
+            for chat_id, summaries in self._user_summaries.items():
+                user_summaries_data[str(chat_id)] = {
+                    username: summary.to_dict()
+                    for username, summary in summaries.items()
+                }
+
             data = {
-                "version": 1,  # For future format migrations
+                "version": 2,  # Increment version for user summaries support
                 "memories": memories_data,
                 "history": history_data,
                 "summarization_count": summarization_data,
+                "user_summaries": user_summaries_data,
             }
 
             # Write atomically using a temp file
@@ -208,7 +324,7 @@ class MemoryManager:
     def load(self) -> None:
         """Load all data from disk.
 
-        Loads memories, history, and summarization counts for all chats.
+        Loads memories, history, summarization counts, and user summaries for all chats.
         """
         try:
             if not self._storage_path.exists():
@@ -219,7 +335,7 @@ class MemoryManager:
 
             # Validate version (for future migrations)
             version = data.get("version", 1)
-            if version != 1:
+            if version not in [1, 2]:
                 logger.warning(f"Unknown data version {version}, skipping load")
                 return
 
@@ -241,11 +357,22 @@ class MemoryManager:
             for chat_id_str, count in data.get("summarization_count", {}).items():
                 self._summarization_count[int(chat_id_str)] = count
 
+            # Load user summaries (version 2+)
+            self._user_summaries = {}
+            if version >= 2:
+                for chat_id_str, summaries_data in data.get("user_summaries", {}).items():
+                    chat_id = int(chat_id_str)
+                    self._user_summaries[chat_id] = {
+                        username: UserSummary.from_dict(summary_data)
+                        for username, summary_data in summaries_data.items()
+                    }
+
             self._dirty = False
             logger.info(
-                f"Loaded data from {self._storage_path}: "
+                f"Loaded data from {self._storage_path} (version {version}): "
                 f"{len(self._memories)} chats with memories, "
-                f"{len(self._history)} chats with history"
+                f"{len(self._history)} chats with history, "
+                f"{len(self._user_summaries)} chats with user summaries"
             )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse saved data: {e}", exc_info=True)

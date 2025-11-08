@@ -15,7 +15,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from .config import BotConfig
 from .const import TG_REACTIONS as COMMON_REACTIONS
 from .context import ConversationContextBuilder
-from .memory import MemoryEntry
+from .memory import MemoryEntry, UserSummary
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ class LLMClient:
         memories: Iterable[MemoryEntry],
         user_message: str,
         is_group_chat: bool = False,
+        user_summaries: Iterable[UserSummary] | None = None,
     ) -> str:
         """Generate a reply using the configured LLM.
 
@@ -94,6 +95,7 @@ class LLMClient:
             memories: Stored memories for the persona
             user_message: The user's current message
             is_group_chat: Whether this is a group chat (affects user name handling)
+            user_summaries: Per-user conversation summaries (optional)
 
         Returns:
             Generated reply text
@@ -112,6 +114,7 @@ class LLMClient:
             history=list(history),
             memories=list(memories),
             current_message=user_message,
+            user_summaries=list(user_summaries) if user_summaries else None,
         )
 
         logger.debug(
@@ -244,6 +247,124 @@ class LLMClient:
             return summary
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")
+            raise
+
+    async def generate_user_summaries(
+        self,
+        messages: List[str],
+        persona: str,
+        model: str,
+    ) -> dict[str, str]:
+        """Generate per-user conversation summaries.
+
+        Args:
+            messages: List of chat messages to summarize (in format "Username: message")
+            persona: The bot's persona for context
+            model: LLM model to use for summarization
+
+        Returns:
+            Dictionary mapping username to their conversation summary
+
+        Raises:
+            OpenAIError: If the API call fails
+            ValueError: If the response is invalid or empty
+        """
+        if not messages:
+            raise ValueError("Cannot summarize empty message list")
+
+        # Group messages by user
+        user_messages: dict[str, List[str]] = {}
+        for msg in messages:
+            # Skip bot messages
+            if msg.startswith("Bot: "):
+                continue
+
+            # Parse user messages in format "Username: message"
+            if ": " in msg:
+                parts = msg.split(": ", 1)
+                if len(parts) == 2:
+                    username, message = parts
+                    if username not in user_messages:
+                        user_messages[username] = []
+                    user_messages[username].append(message)
+
+        if not user_messages:
+            logger.warning("No user messages found to summarize")
+            return {}
+
+        # Create a specialized prompt for per-user summarization
+        messages_text = "\n".join(messages)
+        user_list = ", ".join(user_messages.keys())
+
+        system_prompt = (
+            "You are a helpful assistant that creates concise per-user conversation summaries. "
+            f"The bot's persona is: {persona}. "
+            "For each user mentioned in the conversation, create a brief summary of their key points and contributions. "
+            "Format your response as one line per user in the format: 'Username: summary text' "
+            "Focus on facts, topics discussed, and context that would be useful to remember. "
+            "Keep each user's summary concise (1-2 sentences)."
+        )
+
+        summary_messages: List[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": f"Please create per-user summaries for the following conversation. Users: {user_list}\n\nConversation:\n{messages_text}",
+            },
+        ]
+
+        logger.debug(f"Generating per-user summaries for {len(user_messages)} users")
+
+        # Log the request for debug purposes
+        request_data = {
+            "model": model,
+            "messages": summary_messages,
+            "temperature": 0.3,
+            "max_tokens": 512,
+        }
+        self._log_request("chat.completions.create", request_data)
+
+        def _call() -> dict[str, str]:
+            try:
+                response = self._client.chat.completions.create(
+                    model=model,
+                    messages=summary_messages,
+                    temperature=0.3,  # Lower temperature for more focused summaries
+                    max_tokens=512,  # Enough for multiple user summaries
+                )
+                content = response.choices[0].message.content
+                if content is None:
+                    raise ValueError("LLM returned empty summary")
+
+                # Parse the response into username: summary pairs
+                result = {}
+                for line in content.strip().split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if ": " in line:
+                        parts = line.split(": ", 1)
+                        if len(parts) == 2:
+                            username, summary = parts
+                            result[username.strip()] = summary.strip()
+
+                return result
+            except OpenAIError as e:
+                error_msg = str(e)
+                logger.error(
+                    f"API error while generating user summaries with model '{model}': {error_msg}"
+                )
+                raise
+            except (IndexError, AttributeError) as e:
+                logger.error(f"Invalid response structure from LLM: {e}")
+                raise ValueError("Invalid response from LLM") from e
+
+        try:
+            summaries = await asyncio.to_thread(_call)
+            logger.info(f"Successfully generated summaries for {len(summaries)} users")
+            return summaries
+        except Exception as e:
+            logger.error(f"Failed to generate user summaries: {e}")
             raise
 
     async def suggest_reaction(

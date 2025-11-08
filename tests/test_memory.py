@@ -236,3 +236,128 @@ def test_persistence_summarization_counts(tmp_path: Path) -> None:
     manager2 = MemoryManager(storage_path=storage_path, auto_save=False)
     assert manager2.get_summarization_count(100) == 1
     assert manager2.get_history_size(100) == 10
+
+
+def test_user_summaries_basic(tmp_path: Path) -> None:
+    """Test basic user summary functionality."""
+    storage_path = tmp_path / "test_data.json"
+    manager = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=5)
+    chat_id = 100
+
+    # Add summaries for users
+    manager.add_user_summary(chat_id, "Alice", "Alice discussed Python programming")
+    manager.add_user_summary(chat_id, "Bob", "Bob asked about testing")
+
+    # Get summaries
+    summaries = manager.get_user_summaries(chat_id)
+    assert len(summaries) == 2
+
+    # Should be ordered by last_active (most recent first)
+    usernames = [s.username for s in summaries]
+    assert "Bob" in usernames
+    assert "Alice" in usernames
+
+
+def test_user_summaries_update(tmp_path: Path) -> None:
+    """Test updating user summaries."""
+    storage_path = tmp_path / "test_data.json"
+    manager = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=5)
+    chat_id = 100
+
+    # Add initial summary
+    manager.add_user_summary(chat_id, "Alice", "Initial summary")
+
+    # Update summary for same user
+    manager.add_user_summary(chat_id, "Alice", "Updated summary")
+
+    summaries = manager.get_user_summaries(chat_id)
+    assert len(summaries) == 1
+    assert summaries[0].username == "Alice"
+    assert summaries[0].summary == "Updated summary"
+
+
+def test_user_summaries_max_limit(tmp_path: Path) -> None:
+    """Test that user summaries are limited to max_summarized_users."""
+    storage_path = tmp_path / "test_data.json"
+    manager = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=3)
+    chat_id = 100
+
+    # Add 5 users (exceeds limit of 3)
+    manager.add_user_summary(chat_id, "User1", "Summary 1")
+    manager.add_user_summary(chat_id, "User2", "Summary 2")
+    manager.add_user_summary(chat_id, "User3", "Summary 3")
+    manager.add_user_summary(chat_id, "User4", "Summary 4")
+    manager.add_user_summary(chat_id, "User5", "Summary 5")
+
+    # Should only keep the 3 most recent users
+    summaries = manager.get_user_summaries(chat_id)
+    assert len(summaries) == 3
+
+    # Most recent users should be kept
+    usernames = [s.username for s in summaries]
+    assert "User3" in usernames
+    assert "User4" in usernames
+    assert "User5" in usernames
+    assert "User1" not in usernames  # Oldest, should be removed
+    assert "User2" not in usernames  # Second oldest, should be removed
+
+
+def test_user_summaries_per_chat(tmp_path: Path) -> None:
+    """Test that user summaries are stored separately per chat."""
+    storage_path = tmp_path / "test_data.json"
+    manager = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=5)
+
+    manager.add_user_summary(111, "Alice", "Alice in chat 111")
+    manager.add_user_summary(222, "Alice", "Alice in chat 222")
+    manager.add_user_summary(111, "Bob", "Bob in chat 111")
+
+    chat111_summaries = manager.get_user_summaries(111)
+    chat222_summaries = manager.get_user_summaries(222)
+
+    assert len(chat111_summaries) == 2
+    assert len(chat222_summaries) == 1
+    assert any(s.summary == "Alice in chat 111" for s in chat111_summaries)
+    assert any(s.summary == "Alice in chat 222" for s in chat222_summaries)
+
+
+def test_user_summaries_clear(tmp_path: Path) -> None:
+    """Test clearing user summaries for a chat."""
+    storage_path = tmp_path / "test_data.json"
+    manager = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=5)
+    chat_id = 100
+
+    manager.add_user_summary(chat_id, "Alice", "Summary for Alice")
+    manager.add_user_summary(chat_id, "Bob", "Summary for Bob")
+
+    assert len(manager.get_user_summaries(chat_id)) == 2
+
+    manager.clear_user_summaries(chat_id)
+
+    assert len(manager.get_user_summaries(chat_id)) == 0
+
+
+def test_user_summaries_persistence(tmp_path: Path) -> None:
+    """Test that user summaries are saved and loaded correctly."""
+    storage_path = tmp_path / "test_data.json"
+
+    # Create manager and add user summaries
+    manager1 = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=5)
+    manager1.add_user_summary(100, "Alice", "Alice discussed Python")
+    manager1.add_user_summary(100, "Bob", "Bob asked about testing")
+    manager1.add_user_summary(200, "Charlie", "Charlie in different chat")
+    manager1.save()
+
+    # Load in new manager
+    manager2 = MemoryManager(storage_path=storage_path, auto_save=False, max_summarized_users=5)
+
+    # Verify summaries loaded for chat 100
+    chat100_summaries = manager2.get_user_summaries(100)
+    assert len(chat100_summaries) == 2
+    usernames = [s.username for s in chat100_summaries]
+    assert "Alice" in usernames
+    assert "Bob" in usernames
+
+    # Verify summaries loaded for chat 200
+    chat200_summaries = manager2.get_user_summaries(200)
+    assert len(chat200_summaries) == 1
+    assert chat200_summaries[0].username == "Charlie"
