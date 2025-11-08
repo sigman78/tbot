@@ -443,12 +443,11 @@ def create_application(
         for reaction in new_reactions:
             match reaction:
                 case ReactionTypeEmoji(emoji=emoji):
-                    if emoji in POSITIVE_REACTIONS:
-                        if user and user.id:
-                            memory_manager.add_optin_user(chat_id, user.id)
-                            logger.info(
-                                f"User {user.id} ({user.first_name}) opted in to chat {chat_id}"
-                            )
+                    if emoji in POSITIVE_REACTIONS and (user and user.id):
+                        memory_manager.add_optin_user(chat_id, user.id)
+                        logger.info(
+                            f"User {user.id} ({user.first_name}) opted in to chat {chat_id}"
+                        )
 
     async def handle_ask_optin(
         update: Update, context: ContextTypes.DEFAULT_TYPE
