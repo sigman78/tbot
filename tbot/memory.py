@@ -115,6 +115,8 @@ class MemoryManager:
         self._summarization_count: Dict[int, int] = {}
         self._user_summaries: Dict[int, Dict[str, UserSummary]] = {}  # chat_id -> {username -> UserSummary}
         self._statistics: Dict[int, ChatStatistics] = {}  # chat_id -> ChatStatistics
+        self._optin_lists: Dict[int, set[int]] = {}  # chat_id -> set of user_ids
+        self._optin_message_ids: Dict[int, int] = {}  # chat_id -> message_id of opt-in request
         self._max_summarized_users = max_summarized_users
         self._storage_path = Path(storage_path or Path.home() / ".tbot-data.json")
         self._auto_save = auto_save
@@ -358,6 +360,74 @@ class MemoryManager:
         self._statistics.pop(chat_id, None)
         self._mark_dirty()
 
+    def add_optin_user(self, chat_id: int, user_id: int) -> None:
+        """Add a user to the opt-in list for a chat.
+
+        Args:
+            chat_id: The chat to add the user to
+            user_id: The user ID to add
+        """
+        if chat_id not in self._optin_lists:
+            self._optin_lists[chat_id] = set()
+        self._optin_lists[chat_id].add(user_id)
+        self._mark_dirty()
+        logger.info(f"User {user_id} opted in to chat {chat_id}")
+
+    def is_user_opted_in(self, chat_id: int, user_id: int) -> bool:
+        """Check if a user has opted in to a chat.
+
+        Args:
+            chat_id: The chat to check
+            user_id: The user ID to check
+
+        Returns:
+            True if the user is opted in
+        """
+        return user_id in self._optin_lists.get(chat_id, set())
+
+    def get_optin_users(self, chat_id: int) -> set[int]:
+        """Get all users who have opted in to a chat.
+
+        Args:
+            chat_id: The chat to get users for
+
+        Returns:
+            Set of user IDs
+        """
+        return self._optin_lists.get(chat_id, set()).copy()
+
+    def set_optin_message_id(self, chat_id: int, message_id: int) -> None:
+        """Store the message ID of the opt-in request.
+
+        Args:
+            chat_id: The chat the message belongs to
+            message_id: The message ID to store
+        """
+        self._optin_message_ids[chat_id] = message_id
+        self._mark_dirty()
+        logger.info(f"Set opt-in message ID {message_id} for chat {chat_id}")
+
+    def get_optin_message_id(self, chat_id: int) -> int | None:
+        """Get the message ID of the opt-in request.
+
+        Args:
+            chat_id: The chat to get the message ID for
+
+        Returns:
+            The message ID, or None if not set
+        """
+        return self._optin_message_ids.get(chat_id)
+
+    def clear_optin_data(self, chat_id: int) -> None:
+        """Clear all opt-in data for a chat.
+
+        Args:
+            chat_id: The chat to clear data for
+        """
+        self._optin_lists.pop(chat_id, None)
+        self._optin_message_ids.pop(chat_id, None)
+        self._mark_dirty()
+
     def _mark_dirty(self) -> None:
         """Mark data as changed and trigger auto-save if enabled."""
         self._dirty = True
@@ -394,13 +464,23 @@ class MemoryManager:
             for chat_id, stats in self._statistics.items():
                 statistics_data[str(chat_id)] = stats.to_dict()
 
+            # Convert opt-in lists to serializable format
+            optin_lists_data = {}
+            for chat_id, user_ids in self._optin_lists.items():
+                optin_lists_data[str(chat_id)] = list(user_ids)
+
+            # Convert opt-in message IDs to serializable format
+            optin_message_ids_data = {str(k): v for k, v in self._optin_message_ids.items()}
+
             data = {
-                "version": 3,  # Increment version for statistics support
+                "version": 4,  # Increment version for opt-in support
                 "memories": memories_data,
                 "history": history_data,
                 "summarization_count": summarization_data,
                 "user_summaries": user_summaries_data,
                 "statistics": statistics_data,
+                "optin_lists": optin_lists_data,
+                "optin_message_ids": optin_message_ids_data,
             }
 
             # Write atomically using a temp file
@@ -427,7 +507,7 @@ class MemoryManager:
 
             # Validate version (for future migrations)
             version = data.get("version", 1)
-            if version not in [1, 2, 3]:
+            if version not in [1, 2, 3, 4]:
                 logger.warning(f"Unknown data version {version}, skipping load")
                 return
 
@@ -466,13 +546,27 @@ class MemoryManager:
                     chat_id = int(chat_id_str)
                     self._statistics[chat_id] = ChatStatistics.from_dict(stats_data)
 
+            # Load opt-in lists (version 4+)
+            self._optin_lists = {}
+            if version >= 4:
+                for chat_id_str, user_ids in data.get("optin_lists", {}).items():
+                    chat_id = int(chat_id_str)
+                    self._optin_lists[chat_id] = set(user_ids)
+
+            # Load opt-in message IDs (version 4+)
+            self._optin_message_ids = {}
+            if version >= 4:
+                for chat_id_str, message_id in data.get("optin_message_ids", {}).items():
+                    self._optin_message_ids[int(chat_id_str)] = message_id
+
             self._dirty = False
             logger.info(
                 f"Loaded data from {self._storage_path} (version {version}): "
                 f"{len(self._memories)} chats with memories, "
                 f"{len(self._history)} chats with history, "
                 f"{len(self._user_summaries)} chats with user summaries, "
-                f"{len(self._statistics)} chats with statistics"
+                f"{len(self._statistics)} chats with statistics, "
+                f"{len(self._optin_lists)} chats with opt-in lists"
             )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse saved data: {e}", exc_info=True)
