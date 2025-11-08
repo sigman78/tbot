@@ -41,6 +41,7 @@ class BotConfig:
     auto_summarize_enabled: bool = True
     summarize_threshold: int = 18
     summarize_batch_size: int = 10
+    max_summarized_users: int = 10  # Max number of users to keep summaries for
 
     # Reaction settings
     reactions_enabled: bool = True
@@ -73,6 +74,12 @@ class BotConfig:
             maximum=50,
             field_name="summarize_batch_size",
         )
+        self.max_summarized_users = _ensure_int_in_range(
+            int(self.max_summarized_users),
+            minimum=3,
+            maximum=50,
+            field_name="max_summarized_users",
+        )
         self.reaction_frequency = _clamp(
             float(self.reaction_frequency),
             minimum=0.0,
@@ -97,6 +104,7 @@ class BotConfig:
             "auto_summarize_enabled": self.auto_summarize_enabled,
             "summarize_threshold": self.summarize_threshold,
             "summarize_batch_size": self.summarize_batch_size,
+            "max_summarized_users": self.max_summarized_users,
             "reactions_enabled": self.reactions_enabled,
             "reaction_frequency": self.reaction_frequency,
         }

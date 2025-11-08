@@ -131,23 +131,25 @@ async def _maybe_auto_summarize(
             f"(out of {total_size} total)"
         )
 
-        # Generate summary using LLM
-        summary = await llm_client.generate_summary(
+        # Generate per-user summaries using LLM
+        user_summaries = await llm_client.generate_user_summaries(
             messages=messages_to_summarize,
             persona=config.persona,
             model=config.llm_model,
         )
 
-        # Add summary to memories - ensure no unexpected formatting issues
-        clean_summary = ConversationContextBuilder.strip_bot_prefix(summary)
-        memory_manager.add_memory(chat_id, f"[Auto-summary]: {clean_summary}")
+        # Store each user's summary
+        for username, summary in user_summaries.items():
+            clean_summary = ConversationContextBuilder.strip_bot_prefix(summary)
+            memory_manager.add_user_summary(chat_id, username, clean_summary)
+            logger.debug(f"Stored summary for user {username}: {clean_summary[:50]}...")
 
         # Clear the summarized messages from history
         memory_manager.clear_summarized_messages(chat_id, len(messages_to_summarize))
 
         logger.info(
             f"Successfully summarized and stored {len(messages_to_summarize)} messages "
-            f"for chat {chat_id}. Summary: {summary[:100]}..."
+            f"for chat {chat_id}. Generated summaries for {len(user_summaries)} users."
         )
     except Exception as e:
         # Log error but don't fail the whole conversation
@@ -165,7 +167,12 @@ def create_application(
     """Create the Telegram application with handlers wired in."""
 
     config_manager = config_manager or ConfigManager()
-    memory_manager = memory_manager or MemoryManager()
+    # Create memory manager with max_summarized_users from config
+    if memory_manager is None:
+        config = config_manager.config
+        memory_manager = MemoryManager(
+            max_summarized_users=config.max_summarized_users
+        )
     resolved_api_key = api_key or os.getenv("API_KEY")
     llm_client = llm_client or LLMClient.fromParams(api_key=resolved_api_key)
 
@@ -369,6 +376,7 @@ def create_application(
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         history = memory_manager.get_history(chat_id, config.max_context_messages)
         memories = memory_manager.get_memories(chat_id)
+        user_summaries = memory_manager.get_user_summaries(chat_id)
 
         try:
             reply = await llm_client.generate_reply(
@@ -377,6 +385,7 @@ def create_application(
                 memories=memories,
                 user_message=text,
                 is_group_chat=not is_private_chat,
+                user_summaries=user_summaries,
             )
             # Check if we can send messages in this chat (for groups)
             can_send_messages = True

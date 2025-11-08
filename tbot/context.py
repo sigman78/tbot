@@ -11,7 +11,7 @@ from typing import List
 from openai.types.chat import ChatCompletionMessageParam
 
 from .config import BotConfig
-from .memory import MemoryEntry
+from .memory import MemoryEntry, UserSummary
 
 
 class ConversationContextBuilder:
@@ -36,6 +36,7 @@ class ConversationContextBuilder:
         history: List[str],
         memories: List[MemoryEntry],
         current_message: str,
+        user_summaries: List[UserSummary] | None = None,
     ) -> List[ChatCompletionMessageParam]:
         """Build the complete message list for LLM API.
 
@@ -44,6 +45,7 @@ class ConversationContextBuilder:
             history: Recent conversation history (with user name prefixes)
             memories: Stored memories for context
             current_message: The current user message (without prefix)
+            user_summaries: Per-user conversation summaries (optional)
 
         Returns:
             List of messages formatted for OpenAI-compatible API
@@ -53,6 +55,18 @@ class ConversationContextBuilder:
         # Add system prompt with persona
         system_content = f"{config.system_prompt}\nPersona: {config.persona}"
         messages.append({"role": "system", "content": system_content})
+
+        # Add user summaries if available
+        if user_summaries:
+            summary_lines = [
+                f"{summary.username}: {summary.summary}"
+                for summary in user_summaries
+            ]
+            summary_blob = "\n".join(summary_lines)
+            messages.append({
+                "role": "system",
+                "content": f"Previous conversation summaries (by user):\n{summary_blob}",
+            })
 
         # Add memories if available
         if memories:
