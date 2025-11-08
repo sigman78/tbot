@@ -170,9 +170,7 @@ def create_application(
     # Create memory manager with max_summarized_users from config
     if memory_manager is None:
         config = config_manager.config
-        memory_manager = MemoryManager(
-            max_summarized_users=config.max_summarized_users
-        )
+        memory_manager = MemoryManager(max_summarized_users=config.max_summarized_users)
     resolved_api_key = api_key or os.getenv("API_KEY")
     llm_client = llm_client or LLMClient.fromParams(api_key=resolved_api_key)
 
@@ -195,9 +193,7 @@ def create_application(
         text = _truncate_text(text)
         await message.reply_text(text, parse_mode=ParseMode.HTML)
 
-    async def handle_config(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def handle_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """List all current tunable parameters."""
         message = _get_message(update)
         if message is None:
@@ -215,14 +211,12 @@ def create_application(
             f"• max_summarized_users: {config.max_summarized_users}\n"
             f"• reactions_enabled: {config.reactions_enabled}\n"
             f"• reaction_frequency: {config.reaction_frequency:.2f}\n"
-            "\nUse /set <param> <value> to change a parameter."
+            "\nUse /set &lt;param&gt; &lt;value&gt; to change a parameter."
         )
         text = _truncate_text(text)
         await message.reply_text(text, parse_mode=ParseMode.HTML)
 
-    async def handle_set(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def handle_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Set a configuration parameter."""
         argument = _parse_argument(update)
         message = _get_message(update)
@@ -250,7 +244,12 @@ def create_application(
         try:
             if param in ["response_frequency", "reaction_frequency"]:
                 value = float(value_str)
-            elif param in ["max_context_messages", "summarize_threshold", "summarize_batch_size", "max_summarized_users"]:
+            elif param in [
+                "max_context_messages",
+                "summarize_threshold",
+                "summarize_batch_size",
+                "max_summarized_users",
+            ]:
                 value = int(value_str)
             elif param in ["auto_summarize_enabled", "reactions_enabled"]:
                 value = value_str.lower() in ["true", "1", "yes", "on"]
@@ -287,9 +286,7 @@ def create_application(
         text = _truncate_text(text)
         await message.reply_text(text, parse_mode=ParseMode.HTML)
 
-    async def handle_forget(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def handle_forget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Reset chat memory and summaries."""
         message = _get_message(update)
         if message is None or update.effective_chat is None:
@@ -304,9 +301,7 @@ def create_application(
 
         await message.reply_text("✓ Chat memory and summaries have been reset.")
 
-    async def handle_stat(
-        update: Update, context: ContextTypes.DEFAULT_TYPE
-    ) -> None:
+    async def handle_stat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show runtime statistics for the current chat."""
         message = _get_message(update)
         if message is None or update.effective_chat is None:
@@ -367,13 +362,13 @@ def create_application(
             "<b>Available Commands:</b>\n\n"
             "/persona - Show current persona\n"
             "/config - List all tunable parameters\n"
-            "/set <param> <value> - Set a config parameter\n"
+            "/set &lt;param&gt; &lt;value&gt; - Set a config parameter\n"
             "/summary - Show current chat summaries\n"
             "/forget - Reset chat memory and summaries\n"
             "/stat - Show runtime statistics\n"
             "/memory add|list|clear - Manage long-term memories\n"
             "/help - Show this help message",
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
         )
 
     async def maybe_reply(update: Update, context: CallbackContext) -> None:
