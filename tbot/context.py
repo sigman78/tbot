@@ -6,12 +6,22 @@ into the format expected by the LLM API.
 
 from __future__ import annotations
 
-from typing import List
-
-from openai.types.chat import ChatCompletionMessageParam
+from typing import List, Literal, TypedDict
 
 from .config import BotConfig
 from .memory import MemoryEntry, UserSummary
+
+
+class ChatMessage(TypedDict):
+    """Represents a chat message in the conversation.
+
+    This is an internal type that abstracts away the LLM provider's specific
+    message format. It's compatible with OpenAI's ChatCompletionMessageParam
+    but doesn't create a dependency on the openai package.
+    """
+
+    role: Literal["system", "user", "assistant"]
+    content: str
 
 
 class ConversationContextBuilder:
@@ -37,7 +47,7 @@ class ConversationContextBuilder:
         memories: List[MemoryEntry],
         current_message: str,
         user_summaries: List[UserSummary] | None = None,
-    ) -> List[ChatCompletionMessageParam]:
+    ) -> List[ChatMessage]:
         """Build the complete message list for LLM API.
 
         Args:
@@ -48,9 +58,9 @@ class ConversationContextBuilder:
             user_summaries: Per-user conversation summaries (optional)
 
         Returns:
-            List of messages formatted for OpenAI-compatible API
+            List of messages formatted for LLM API
         """
-        messages: List[ChatCompletionMessageParam] = []
+        messages: List[ChatMessage] = []
 
         # Add system prompt with persona
         system_content = f"{config.system_prompt}\nPersona: {config.persona}"
@@ -86,7 +96,7 @@ class ConversationContextBuilder:
 
         return messages
 
-    def _parse_history_item(self, item: str) -> ChatCompletionMessageParam:
+    def _parse_history_item(self, item: str) -> ChatMessage:
         """Parse a history item into an API message.
 
         History items are stored in format:
