@@ -24,9 +24,19 @@ DEFAULT_TEMPERATURE = 0.8
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
-# Request logging for debug purposes (temporary)
-ENABLE_REQUEST_LOGGING = True
+# Request logging for debug purposes
+_ENABLE_REQUEST_LOGGING = False
 REQUEST_LOG_FILE = Path("llm_requests.log")
+
+
+def set_debug_logging(enabled: bool) -> None:
+    """Enable or disable raw LLM request logging.
+
+    Args:
+        enabled: Whether to enable debug logging
+    """
+    global _ENABLE_REQUEST_LOGGING
+    _ENABLE_REQUEST_LOGGING = enabled
 
 
 class LLMClient:
@@ -55,13 +65,13 @@ class LLMClient:
         self._client = client
 
     def _log_request(self, endpoint: str, request_data: dict) -> None:
-        """Log raw LLM request for debug purposes (temporary solution).
+        """Log raw LLM request for debug purposes.
 
         Args:
             endpoint: API endpoint being called
             request_data: Request payload to log
         """
-        if not ENABLE_REQUEST_LOGGING:
+        if not _ENABLE_REQUEST_LOGGING:
             return
 
         try:

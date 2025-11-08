@@ -6,14 +6,14 @@ A lightweight Python project showcasing an LLM-driven Telegram bot that role-pla
 
 - **Smart reply logic**: Always responds in private 1-on-1 chats, uses configurable frequency in groups
 - **Emoji reactions**: LLM-powered emoji reactions to messages based on persona and context
-- **Auto-summarization**: Automatically summarizes old conversations and stores them as memories when history grows
-- **Persistent storage**: Memories and chat history automatically saved to disk and restored on restart
-- Adjustable reply frequency, persona, system prompt, and model via Telegram commands.
-- Lightweight, file-backed configuration with built-in validation.
-- Per-chat memory and history tracking with automatic management.
-- Extensible LLM wrapper for OpenRouter-compatible models.
-- Async implementation powered by `python-telegram-bot` v20.
-- Comprehensive error handling and logging for debugging
+- **Auto-summarization**: Automatically summarizes old conversations and stores per-user summaries
+- **Runtime statistics**: Tracks replies, reactions, LLM calls, and token usage per chat
+- **Persistent storage**: Memories, history, summaries, and statistics saved to disk and restored on restart
+- **Unified configuration**: Clean CLI with click, comprehensive Telegram commands, and JSON config
+- Per-chat memory and history tracking with automatic management
+- Extensible LLM wrapper for OpenRouter-compatible models
+- Async implementation powered by `python-telegram-bot` v20
+- Comprehensive error handling and debug logging
 
 ## Setup
 
@@ -34,14 +34,14 @@ A lightweight Python project showcasing an LLM-driven Telegram bot that role-pla
 3. Run the bot:
 
    ```bash
-   python -m tbot.main --api-key "$API_KEY"
+   python -m tbot --token "$TELEGRAM_BOT_TOKEN" --api-key "$API_KEY"
    ```
 
-   Or with verbose logging for debugging:
-
-   ```bash
-   python -m tbot.main --api-key "$API_KEY" --verbose
-   ```
+   CLI options:
+   - `--token` - Telegram bot token (or use `TELEGRAM_BOT_TOKEN` env var)
+   - `--api-key` - OpenRouter API key (or use `API_KEY` env var)
+   - `--verbose` / `-v` - Enable verbose DEBUG logging
+   - `--debug` - Enable raw LLM request logging to `llm_requests.log`
 
 The bot stores its configuration in `~/.tbot-config.json` by default.
 
@@ -72,13 +72,13 @@ This ensures the bot can maintain long-term context while keeping the conversati
 All chat data is automatically persisted to disk:
 
 - **Storage location**: `~/.tbot-data.json` (configurable)
-- **What's saved**: Memories, conversation history, and summarization counts for all chats
+- **What's saved**: Memories, conversation history, per-user summaries, and runtime statistics for all chats
 - **Auto-save**: Changes are immediately saved to disk after each modification
 - **Auto-load**: Data is automatically loaded when the bot starts
 - **Atomic writes**: Uses temporary files to prevent data corruption
 - **Per-chat isolation**: Each chat's data is stored and restored independently
 
-The bot maintains continuity across restarts, remembering past conversations and accumulated memories.
+The bot maintains continuity across restarts, remembering past conversations, accumulated memories, and usage statistics.
 
 ## Configuration
 
@@ -94,8 +94,22 @@ The bot stores its configuration in `~/.tbot-config.json`. Here are the availabl
 | `auto_summarize_enabled` | true | Enable/disable automatic summarization |
 | `summarize_threshold` | 18 | Number of messages that triggers summarization |
 | `summarize_batch_size` | 10 | Number of oldest messages to summarize at once |
+| `max_summarized_users` | 10 | Maximum number of users to keep summaries for |
 | `reactions_enabled` | true | Enable/disable emoji reactions to messages |
 | `reaction_frequency` | 0.3 | Probability (0.0-1.0) of adding a reaction to user messages |
 
-You can edit the config file directly or use Telegram commands to update some settings.
+You can edit the config file directly or use Telegram commands to update settings.
+
+## Telegram Commands
+
+Configure and monitor the bot directly from Telegram:
+
+- `/persona` - Show current persona description
+- `/config` - List all tunable parameters and their current values
+- `/set <param> <value>` - Set any configuration parameter (e.g., `/set response_frequency 0.5`)
+- `/summary` - Display current chat conversation summaries
+- `/forget` - Reset chat memory, history, and summaries
+- `/stat` - Show runtime statistics (replies, reactions, LLM calls, tokens used)
+- `/memory add|list|clear` - Manage long-term memories
+- `/help` - Show command help
 

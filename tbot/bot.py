@@ -181,55 +181,153 @@ def create_application(
     async def handle_persona(
         update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        argument = _parse_argument(update)
+        """Display the first part of the persona card."""
         message = _get_message(update)
         if message is None:
             return
-        if not argument:
-            await message.reply_text("Usage: /persona <description>")
-            return
-        config_manager.set_field("persona", argument)
-        await message.reply_text("Persona updated.")
+        config = config_manager.config
+        # Show first 500 characters of persona
+        persona_preview = config.persona
+        if len(persona_preview) > 500:
+            persona_preview = persona_preview[:500] + "..."
 
-    async def handle_frequency(
+        text = f"<b>Current Persona:</b>\n{persona_preview}"
+        text = _truncate_text(text)
+        await message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def handle_config(
         update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        """List all current tunable parameters."""
+        message = _get_message(update)
+        if message is None:
+            return
+        config = config_manager.config
+
+        text = (
+            "<b>Current Configuration:</b>\n"
+            f"• response_frequency: {config.response_frequency:.2f}\n"
+            f"• llm_model: {config.llm_model}\n"
+            f"• max_context_messages: {config.max_context_messages}\n"
+            f"• auto_summarize_enabled: {config.auto_summarize_enabled}\n"
+            f"• summarize_threshold: {config.summarize_threshold}\n"
+            f"• summarize_batch_size: {config.summarize_batch_size}\n"
+            f"• max_summarized_users: {config.max_summarized_users}\n"
+            f"• reactions_enabled: {config.reactions_enabled}\n"
+            f"• reaction_frequency: {config.reaction_frequency:.2f}\n"
+            "\nUse /set <param> <value> to change a parameter."
+        )
+        text = _truncate_text(text)
+        await message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def handle_set(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Set a configuration parameter."""
         argument = _parse_argument(update)
         message = _get_message(update)
         if message is None:
             return
+
+        if not argument:
+            await message.reply_text(
+                "Usage: /set <param> <value>\n"
+                "Available parameters: response_frequency, llm_model, max_context_messages, "
+                "auto_summarize_enabled, summarize_threshold, summarize_batch_size, "
+                "max_summarized_users, reactions_enabled, reaction_frequency, "
+                "persona, system_prompt"
+            )
+            return
+
+        parts = argument.split(None, 1)
+        if len(parts) < 2:
+            await message.reply_text("Usage: /set <param> <value>")
+            return
+
+        param, value_str = parts
+
+        # Convert value to appropriate type
         try:
-            value = float(argument)
-        except ValueError:
-            await message.reply_text("Usage: /frequency <0.0-1.0>")
-            return
-        config_manager.set_field("response_frequency", value)
-        await message.reply_text(f"Response frequency set to {value:.2f}.")
+            if param in ["response_frequency", "reaction_frequency"]:
+                value = float(value_str)
+            elif param in ["max_context_messages", "summarize_threshold", "summarize_batch_size", "max_summarized_users"]:
+                value = int(value_str)
+            elif param in ["auto_summarize_enabled", "reactions_enabled"]:
+                value = value_str.lower() in ["true", "1", "yes", "on"]
+            elif param in ["persona", "system_prompt", "llm_model"]:
+                value = value_str
+            else:
+                await message.reply_text(f"Unknown parameter: {param}")
+                return
 
-    async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        argument = _parse_argument(update)
+            config_manager.set_field(param, value)
+            await message.reply_text(f"✓ Set {param} = {value}")
+        except (ValueError, KeyError) as e:
+            await message.reply_text(f"Error setting {param}: {e}")
+
+    async def handle_summary(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Show current chat summary (user summaries)."""
         message = _get_message(update)
-        if message is None:
+        if message is None or update.effective_chat is None:
             return
-        if not argument:
-            await message.reply_text("Usage: /prompt <system prompt>")
-            return
-        config_manager.set_field("system_prompt", argument)
-        await message.reply_text("System prompt updated.")
+        chat_id = update.effective_chat.id
 
-    async def handle_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        argument = _parse_argument(update)
+        user_summaries = memory_manager.get_user_summaries(chat_id)
+        if not user_summaries:
+            await message.reply_text("No conversation summaries yet.")
+            return
+
+        lines = ["<b>Conversation Summaries:</b>"]
+        for summary in user_summaries:
+            lines.append(f"\n<b>{summary.username}:</b> {summary.summary}")
+
+        text = "\n".join(lines)
+        text = _truncate_text(text)
+        await message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def handle_forget(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Reset chat memory and summaries."""
         message = _get_message(update)
-        if message is None:
+        if message is None or update.effective_chat is None:
             return
-        if not argument:
-            await message.reply_text("Usage: /model <model name>")
-            return
-        config_manager.set_field("llm_model", argument)
-        await message.reply_text(f"Model set to {argument}.")
+        chat_id = update.effective_chat.id
 
-    async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await _reply_with_config(update, config_manager.config)
+        # Clear history, memories, and summaries
+        memory_manager._history.pop(chat_id, None)
+        memory_manager.clear_memories(chat_id)
+        memory_manager.clear_user_summaries(chat_id)
+        memory_manager._mark_dirty()
+
+        await message.reply_text("✓ Chat memory and summaries have been reset.")
+
+    async def handle_stat(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Show runtime statistics for the current chat."""
+        message = _get_message(update)
+        if message is None or update.effective_chat is None:
+            return
+        chat_id = update.effective_chat.id
+
+        stats = memory_manager.get_statistics(chat_id)
+
+        text = (
+            "<b>Chat Statistics:</b>\n"
+            f"• Replies: {stats.replies}\n"
+            f"• Reactions: {stats.reactions}\n"
+            f"• LLM calls: {stats.llm_calls}\n"
+            f"• Tokens sent: {stats.tokens_sent}\n"
+            f"• Tokens received: {stats.tokens_received}\n"
+        )
+        if stats.tokens_sent + stats.tokens_received > 0:
+            text += f"• Total tokens: {stats.tokens_sent + stats.tokens_received}"
+
+        text = _truncate_text(text)
+        await message.reply_text(text, parse_mode=ParseMode.HTML)
 
     async def handle_memory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         argument = _parse_argument(update)
@@ -266,13 +364,16 @@ def create_application(
         if message is None:
             return
         await message.reply_text(
-            "Available commands:\n"
-            "/persona <text> - set persona\n"
-            "/frequency <0-1> - adjust reply probability\n"
-            "/prompt <text> - set system prompt\n"
-            "/model <name> - set OpenRouter model\n"
-            "/memory add|list|clear - manage memories\n"
-            "/status - show configuration"
+            "<b>Available Commands:</b>\n\n"
+            "/persona - Show current persona\n"
+            "/config - List all tunable parameters\n"
+            "/set <param> <value> - Set a config parameter\n"
+            "/summary - Show current chat summaries\n"
+            "/forget - Reset chat memory and summaries\n"
+            "/stat - Show runtime statistics\n"
+            "/memory add|list|clear - Manage long-term memories\n"
+            "/help - Show this help message",
+            parse_mode=ParseMode.HTML
         )
 
     async def maybe_reply(update: Update, context: CallbackContext) -> None:
@@ -354,6 +455,7 @@ def create_application(
                     )
                     if reaction:
                         await message.set_reaction(reaction)
+                        memory_manager.increment_reaction_count(chat_id)
                         logger.debug(
                             f"Set reaction {reaction} on message in chat {chat_id}"
                         )
@@ -387,6 +489,9 @@ def create_application(
                 is_group_chat=not is_private_chat,
                 user_summaries=user_summaries,
             )
+            # Track LLM call in statistics
+            memory_manager.increment_llm_call_count(chat_id)
+
             # Check if we can send messages in this chat (for groups)
             can_send_messages = True
             if update.effective_chat.type in ["group", "supergroup"]:
@@ -422,6 +527,8 @@ def create_application(
                     chat_id,
                     ConversationContextBuilder.format_bot_message(clean_reply),
                 )
+                # Track reply in statistics
+                memory_manager.increment_reply_count(chat_id)
                 logger.info(f"Successfully replied to message in chat {chat_id}")
             else:
                 logger.warning(
@@ -516,11 +623,13 @@ def create_application(
     # Register the startup info logger
     application.post_init = log_bot_info
 
+    # Register command handlers
     application.add_handler(CommandHandler("persona", handle_persona))
-    application.add_handler(CommandHandler("frequency", handle_frequency))
-    application.add_handler(CommandHandler("prompt", handle_prompt))
-    application.add_handler(CommandHandler("model", handle_model))
-    application.add_handler(CommandHandler("status", handle_status))
+    application.add_handler(CommandHandler("config", handle_config))
+    application.add_handler(CommandHandler("set", handle_set))
+    application.add_handler(CommandHandler("summary", handle_summary))
+    application.add_handler(CommandHandler("forget", handle_forget))
+    application.add_handler(CommandHandler("stat", handle_stat))
     application.add_handler(CommandHandler("memory", handle_memory))
     application.add_handler(CommandHandler("help", handle_help))
     application.add_handler(
