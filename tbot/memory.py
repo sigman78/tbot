@@ -244,7 +244,7 @@ class MemoryManager:
         self._user_summaries[chat_id][username] = UserSummary(
             username=username,
             summary=summary,
-            last_active=datetime.utcnow(),
+            last_active=datetime.utcnow(),  # BUG: Not enough precision (at least for test)
         )
 
         # Enforce max user limit

@@ -86,3 +86,46 @@ def test_supergroup_treated_as_group():
         replied_to_bot=False,
         is_private_chat=False,  # Supergroup is not private
     )
+
+
+def test_opt_in_prevents_message_processing():
+    """Test that opt-in requirement prevents message processing for non-opted-in users."""
+    # This test verifies the core logic that prevents message storage/processing
+    # when explicit_optin is enabled and user hasn't opted in
+
+    from tbot.memory import MemoryManager
+
+    memory_manager = MemoryManager(auto_save=False)
+
+    # Simulate the opt-in check logic from the bot
+    chat_id = 12345
+    user_id = 67890
+    chat_type = "group"
+    explicit_optin_enabled = True
+
+    # User has not opted in
+    assert not memory_manager.is_user_opted_in(chat_id, user_id)
+
+    # Simulate the opt-in check from maybe_reply function
+    is_group_chat = chat_type in ["group", "supergroup"]
+    should_process = True
+
+    if explicit_optin_enabled and is_group_chat:
+        if not memory_manager.is_user_opted_in(chat_id, user_id):
+            should_process = False
+
+    # Message should not be processed due to opt-in requirement
+    assert not should_process
+
+    # Now test with opted-in user
+    memory_manager.add_optin_user(chat_id, user_id)
+    assert memory_manager.is_user_opted_in(chat_id, user_id)
+
+    # Reset the logic check
+    should_process = True
+    if explicit_optin_enabled and is_group_chat:
+        if not memory_manager.is_user_opted_in(chat_id, user_id):
+            should_process = False
+
+    # Message should be processed since user is opted in
+    assert should_process

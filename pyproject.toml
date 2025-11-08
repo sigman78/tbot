@@ -18,3 +18,11 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88 # Example: Set a desired line length
+target-version = "py310" # Example: Target Python version
+select = ["E", "F", "I"] # Enable error, flake8, and import sorting rules
+ignore = ["E501", "COM812"]
+extend-select = ["I"] # Enable import sorting
+skip-magic-trailing-comma = true
