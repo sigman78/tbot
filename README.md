@@ -5,6 +5,7 @@ A lightweight Python project showcasing an LLM-driven Telegram bot that role-pla
 ## Features
 
 - **Smart reply logic**: Always responds in private 1-on-1 chats, uses configurable frequency in groups
+- **Explicit opt-in**: Optional privacy mode where bot only interacts with users who explicitly opt-in (group chats)
 - **Emoji reactions**: LLM-powered emoji reactions to messages based on persona and context
 - **Auto-summarization**: Automatically summarizes old conversations and stores per-user summaries
 - **Runtime statistics**: Tracks replies, reactions, LLM calls, and token usage per chat
@@ -52,6 +53,18 @@ The bot stores its configuration in `~/.tbot-config.json` by default.
 - **Direct replies**: The bot always responds when you reply to one of its messages (in any chat type)
 - **Mentions**: The bot always responds when it's mentioned in a message (by @username or first name)
 
+### Explicit Opt-in (Privacy Mode)
+
+When `explicit_optin` is enabled, the bot implements a privacy-first approach in group chats:
+
+- **Automatic opt-in request**: When added to a group, the bot sends a message asking users to react with 👍, ❤️, or other positive reactions to opt-in
+- **Privacy guarantee**: The bot only reads, stores, and processes messages from users who have opted in
+- **No passive monitoring**: Messages from non-opted-in users are completely ignored - not read, stored, or processed
+- **Manual trigger**: Use `/ask_optin` command to send the opt-in request at any time
+- **Per-chat storage**: Opt-in status is stored separately for each group chat
+
+This feature ensures explicit consent before the bot interacts with any user in group settings.
+
 ### Auto-summarization
 
 The bot automatically manages conversation history per chat:
@@ -97,6 +110,7 @@ The bot stores its configuration in `~/.tbot-config.json`. Here are the availabl
 | `max_summarized_users` | 10 | Maximum number of users to keep summaries for |
 | `reactions_enabled` | true | Enable/disable emoji reactions to messages |
 | `reaction_frequency` | 0.3 | Probability (0.0-1.0) of adding a reaction to user messages |
+| `explicit_optin` | false | Enable explicit opt-in mode (bot only interacts with opted-in users in groups) |
 
 You can edit the config file directly or use Telegram commands to update settings.
 
@@ -111,5 +125,6 @@ Configure and monitor the bot directly from Telegram:
 - `/forget` - Reset chat memory, history, and summaries
 - `/stat` - Show runtime statistics (replies, reactions, LLM calls, tokens used)
 - `/memory add|list|clear` - Manage long-term memories
+- `/ask_optin` - Request users to opt-in to bot interactions (only in groups, when `explicit_optin` is enabled)
 - `/help` - Show command help
 

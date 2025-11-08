@@ -47,6 +47,9 @@ class BotConfig:
     reactions_enabled: bool = True
     reaction_frequency: float = 0.3
 
+    # Opt-in settings
+    explicit_optin: bool = False
+
     def __post_init__(self) -> None:
         self.persona = self.persona.strip()
         self.system_prompt = self.system_prompt.strip()
@@ -107,6 +110,7 @@ class BotConfig:
             "max_summarized_users": self.max_summarized_users,
             "reactions_enabled": self.reactions_enabled,
             "reaction_frequency": self.reaction_frequency,
+            "explicit_optin": self.explicit_optin,
         }
 
     def model_dump_json(self, indent: int | None = None) -> str:

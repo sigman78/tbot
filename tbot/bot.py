@@ -7,18 +7,21 @@ import logging
 import os
 import random
 
-from telegram import Message, Update
-from telegram.constants import ChatAction, ParseMode
+from telegram import ChatMemberUpdated, Message, Update
+from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
 from telegram.ext import (
     Application,
     CallbackContext,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    MessageReactionHandler,
     filters,
 )
 
 from .config import BotConfig, ConfigManager
+from .const import POSITIVE_REACTIONS
 from .context import ConversationContextBuilder
 from .llm_client import LLMClient
 from .logic import should_respond
@@ -211,6 +214,7 @@ def create_application(
             f"• max_summarized_users: {config.max_summarized_users}\n"
             f"• reactions_enabled: {config.reactions_enabled}\n"
             f"• reaction_frequency: {config.reaction_frequency:.2f}\n"
+            f"• explicit_optin: {config.explicit_optin}\n"
             "\nUse /set &lt;param&gt; &lt;value&gt; to change a parameter."
         )
         text = _truncate_text(text)
@@ -229,7 +233,7 @@ def create_application(
                 "Available parameters: response_frequency, llm_model, max_context_messages, "
                 "auto_summarize_enabled, summarize_threshold, summarize_batch_size, "
                 "max_summarized_users, reactions_enabled, reaction_frequency, "
-                "persona, system_prompt"
+                "explicit_optin, persona, system_prompt"
             )
             return
 
@@ -251,7 +255,7 @@ def create_application(
                 "max_summarized_users",
             ]:
                 value = int(value_str)
-            elif param in ["auto_summarize_enabled", "reactions_enabled"]:
+            elif param in ["auto_summarize_enabled", "reactions_enabled", "explicit_optin"]:
                 value = value_str.lower() in ["true", "1", "yes", "on"]
             elif param in ["persona", "system_prompt", "llm_model"]:
                 value = value_str
@@ -354,11 +358,124 @@ def create_application(
         else:
             await message.reply_text("Usage: /memory <add|clear|list> [text]")
 
+    async def handle_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle when bot is added to a group chat."""
+        if update.my_chat_member is None or update.effective_chat is None:
+            return
+
+        chat_id = update.effective_chat.id
+        config = config_manager.config
+
+        # Only process for group chats
+        if update.effective_chat.type not in ["group", "supergroup"]:
+            return
+
+        # Check if bot was added to the group
+        new_status = update.my_chat_member.new_chat_member.status
+        old_status = update.my_chat_member.old_chat_member.status
+
+        # Bot was just added (transition from not-member to member/admin)
+        if old_status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED] and \
+           new_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR]:
+
+            # If explicit_optin is enabled, send opt-in request
+            if config.explicit_optin:
+                try:
+                    optin_message = await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "👋 Hello! I've been added to this group.\n\n"
+                            "React to this message with a positive reaction (👍, ❤️, etc.) to opt-in to interactions with me.\n\n"
+                            "⚠️ Privacy: I will have access only to messages of users who agreed to opt-in. "
+                            "Messages from users who don't opt-in will not be read, stored, or processed by me."
+                        )
+                    )
+
+                    # Store the message ID for tracking reactions
+                    memory_manager.set_optin_message_id(chat_id, optin_message.message_id)
+                    logger.info(f"Bot added to group {chat_id}, sent opt-in request")
+                except Exception as e:
+                    logger.error(f"Failed to send opt-in message in chat {chat_id}: {e}")
+
+    async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle message reactions to track opt-ins."""
+        if update.message_reaction is None or update.effective_chat is None:
+            return
+
+        chat_id = update.effective_chat.id
+        config = config_manager.config
+
+        # Only process reactions if explicit_optin is enabled
+        if not config.explicit_optin:
+            return
+
+        # Only process reactions in group chats
+        if update.effective_chat.type not in ["group", "supergroup"]:
+            return
+
+        message_id = update.message_reaction.message_id
+        user = update.message_reaction.user
+
+        # Check if this is a reaction to the opt-in message
+        optin_message_id = memory_manager.get_optin_message_id(chat_id)
+        if optin_message_id is None or message_id != optin_message_id:
+            return
+
+        # Check if user reacted with a positive reaction
+        new_reactions = update.message_reaction.new_reaction
+        if not new_reactions:
+            return
+
+        # Check if any of the new reactions are positive
+        for reaction in new_reactions:
+            # Handle both emoji reactions and custom emoji reactions
+            emoji = None
+            if hasattr(reaction, "emoji"):
+                emoji = reaction.emoji
+            elif hasattr(reaction, "type") and reaction.type == "emoji":
+                emoji = getattr(reaction, "emoji", None)
+
+            if emoji and emoji in POSITIVE_REACTIONS:
+                # Add user to opt-in list
+                if user and user.id:
+                    memory_manager.add_optin_user(chat_id, user.id)
+                    logger.info(f"User {user.id} ({user.first_name}) opted in to chat {chat_id}")
+                break
+
+    async def handle_ask_optin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Request users to opt-in to bot interactions."""
+        message = _get_message(update)
+        if message is None or update.effective_chat is None:
+            return
+
+        chat_id = update.effective_chat.id
+        config = config_manager.config
+
+        # Only works in group chats
+        if update.effective_chat.type not in ["group", "supergroup"]:
+            await message.reply_text(
+                "This command is only available in group chats."
+            )
+            return
+
+        # Send opt-in request message
+        optin_message = await message.reply_text(
+            "👋 React to this message with a positive reaction (👍, ❤️, etc.) to opt-in to interactions with this bot.\n\n"
+            "⚠️ Privacy: I will have access only to messages of users who agreed to opt-in. "
+            "Messages from users who don't opt-in will not be read, stored, or processed by me."
+        )
+
+        # Store the message ID for tracking reactions
+        memory_manager.set_optin_message_id(chat_id, optin_message.message_id)
+        logger.info(f"Sent opt-in request in chat {chat_id}")
+
     async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = _get_message(update)
         if message is None:
             return
-        await message.reply_text(
+
+        config = config_manager.config
+        help_text = (
             "<b>Available Commands:</b>\n\n"
             "/persona - Show current persona\n"
             "/config - List all tunable parameters\n"
@@ -367,9 +484,15 @@ def create_application(
             "/forget - Reset chat memory and summaries\n"
             "/stat - Show runtime statistics\n"
             "/memory add|list|clear - Manage long-term memories\n"
-            "/help - Show this help message",
-            parse_mode=ParseMode.HTML,
         )
+
+        # Add opt-in command to help if explicit_optin is enabled
+        if config.explicit_optin:
+            help_text += "/ask_optin - Request users to opt-in\n"
+
+        help_text += "/help - Show this help message"
+
+        await message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
     async def maybe_reply(update: Update, context: CallbackContext) -> None:
         message = _get_message(update)
@@ -380,6 +503,18 @@ def create_application(
         if not text:
             return
 
+        config = config_manager.config
+
+        # Check explicit opt-in if enabled in group chats
+        is_group_chat = update.effective_chat.type in ["group", "supergroup"]
+        if config.explicit_optin and is_group_chat:
+            # Check if user has opted in
+            user_id = update.effective_user.id if update.effective_user else None
+            if user_id and not memory_manager.is_user_opted_in(chat_id, user_id):
+                # User has not opted in, don't process their message
+                logger.debug(f"User {user_id} has not opted in to chat {chat_id}, ignoring message")
+                return
+
         # Ensure consistent formatting for user messages in history
         user_name = "User"
         if update.effective_user and update.effective_user.first_name:
@@ -388,8 +523,6 @@ def create_application(
             chat_id,
             ConversationContextBuilder.format_user_message(user_name, text),
         )
-
-        config = config_manager.config
         bot_user = context.bot if hasattr(context, "bot") else None
         replied_to_bot = False
         mentioned_bot = False
@@ -626,7 +759,16 @@ def create_application(
     application.add_handler(CommandHandler("forget", handle_forget))
     application.add_handler(CommandHandler("stat", handle_stat))
     application.add_handler(CommandHandler("memory", handle_memory))
+    application.add_handler(CommandHandler("ask_optin", handle_ask_optin))
     application.add_handler(CommandHandler("help", handle_help))
+
+    # Register reaction handler for opt-in tracking
+    application.add_handler(MessageReactionHandler(handle_reaction))
+
+    # Register chat member handler for bot being added to groups
+    application.add_handler(ChatMemberHandler(handle_bot_added_to_group, ChatMemberHandler.MY_CHAT_MEMBER))
+
+    # Register message handler
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, maybe_reply)
     )
