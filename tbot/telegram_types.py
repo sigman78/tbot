@@ -33,14 +33,15 @@ def extract_emoji_from_reaction(reaction: "ReactionType") -> str | None:
     # Import here to avoid circular dependencies and keep imports clean
     from telegram import ReactionTypeEmoji
 
-    # Type-safe extraction using isinstance
-    if isinstance(reaction, ReactionTypeEmoji):
-        return reaction.emoji
-
-    # Log when we encounter non-emoji reactions (useful for debugging)
-    reaction_type = type(reaction).__name__
-    logger.debug(f"Ignoring non-emoji reaction type: {reaction_type}")
-    return None
+    # Type-safe extraction using pattern matching
+    match reaction:
+        case ReactionTypeEmoji(emoji=emoji):
+            return emoji
+        case _:
+            # Log when we encounter non-emoji reactions (useful for debugging)
+            reaction_type = type(reaction).__name__
+            logger.debug(f"Ignoring non-emoji reaction type: {reaction_type}")
+            return None
 
 
 def extract_emojis_from_reactions(
@@ -85,9 +86,11 @@ def has_positive_reaction(
     if not reactions:
         return False
 
+    from telegram import ReactionTypeEmoji
+
     for reaction in reactions:
-        emoji = extract_emoji_from_reaction(reaction)
-        if emoji and emoji in positive_emojis:
-            return True
+        match reaction:
+            case ReactionTypeEmoji(emoji=emoji) if emoji in positive_emojis:
+                return True
 
     return False
