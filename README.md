@@ -1,130 +1,64 @@
 # Telegram Persona Bot
 
-A lightweight Python project showcasing an LLM-driven Telegram bot that role-plays as a configurable persona. The bot talks through [OpenRouter](https://openrouter.ai) using an OpenAI-compatible API and keeps short-term memories for each chat.
+Simple Telegram bot that role-plays as a configurable persona via OpenAI API compatible service.
 
 ## Features
 
-- **Smart reply logic**: Always responds in private 1-on-1 chats, uses configurable frequency in groups
-- **Explicit opt-in**: Optional privacy mode where bot only interacts with users who explicitly opt-in (group chats)
-- **Emoji reactions**: LLM-powered emoji reactions to messages based on persona and context
-- **Auto-summarization**: Automatically summarizes old conversations and stores per-user summaries
-- **Runtime statistics**: Tracks replies, reactions, LLM calls, and token usage per chat
-- **Persistent storage**: Memories, history, summaries, and statistics saved to disk and restored on restart
-- **Unified configuration**: Clean CLI with click, comprehensive Telegram commands, and JSON config
-- Per-chat memory and history tracking with automatic management
-- Extensible LLM wrapper for OpenRouter-compatible models
-- Async implementation powered by `python-telegram-bot` v20
-- Comprehensive error handling and debug logging
+- Smart replies in private/group chats with configurable frequency
+- Privacy mode: explicit opt-in required for group interactions
+- LLM-powered emoji reactions based on context
+- Auto-summarization of conversation history
+- Persistent memory and statistics across restarts
+- Comprehensive Telegram commands for configuration
 
-## Setup
+## Quick Start
 
-1. Install dependencies (preferably in a virtual environment):
+```bash
+# Install dependencies
+uv sync
 
-   ```bash
-   cd /path/to/repo/tbot
-   pip install -r requirements-dev.txt
-   ```
+# Run bot (choose one method)
+uv run tbot-cli --token <telegram-bot-token> --api-key <openai-api-key>
+# OR with environment variables
+export TELEGRAM_BOT_TOKEN="<token>" && export API_KEY="<key>" && uv run tbot-cli
+# OR create .env file with TELEGRAM_BOT_TOKEN and API_KEY variables
+```
 
-2. Export your credentials:
+## Development
 
-   ```bash
-   export TELEGRAM_BOT_TOKEN="<telegram-token>"
-   export API_KEY="<openrouter-api-key>"
-   ```
+```bash
+# Setup dev environment
+uv sync --dev
 
-3. Run the bot:
+# Run tests
+uv run pytest
 
-   ```bash
-   python -m tbot --token "$TELEGRAM_BOT_TOKEN" --api-key "$API_KEY"
-   ```
-
-   CLI options:
-   - `--token` - Telegram bot token (or use `TELEGRAM_BOT_TOKEN` env var)
-   - `--api-key` - OpenRouter API key (or use `API_KEY` env var)
-   - `--verbose` / `-v` - Enable verbose DEBUG logging
-   - `--debug` - Enable raw LLM request logging to `llm_requests.log`
-
-The bot stores its configuration in `~/.tbot-config.json` by default.
-
-## Behavior
-
-- **Private chats**: The bot always responds to messages in private 1-on-1 conversations
-- **Group chats**: The bot uses the configured `response_frequency` to decide whether to respond
-- **Direct replies**: The bot always responds when you reply to one of its messages (in any chat type)
-- **Mentions**: The bot always responds when it's mentioned in a message (by @username or first name)
-
-### Explicit Opt-in (Privacy Mode)
-
-When `explicit_optin` is enabled, the bot implements a privacy-first approach in group chats:
-
-- **Automatic opt-in request**: When added to a group, the bot sends a message asking users to react with 👍, ❤️, or other positive reactions to opt-in
-- **Privacy guarantee**: The bot only reads, stores, and processes messages from users who have opted in
-- **No passive monitoring**: Messages from non-opted-in users are completely ignored - not read, stored, or processed
-- **Manual trigger**: Use `/ask_optin` command to send the opt-in request at any time
-- **Per-chat storage**: Opt-in status is stored separately for each group chat
-
-This feature ensures explicit consent before the bot interacts with any user in group settings.
-
-### Auto-summarization
-
-The bot automatically manages conversation history per chat:
-
-- **History tracking**: Each chat maintains its own separate conversation history
-- **Automatic summarization**: When history reaches the threshold (default: 18 messages), the bot:
-  1. Takes the oldest messages (default: 10 messages)
-  2. Uses the LLM to generate a concise summary
-  3. Stores the summary as a memory
-  4. Removes the summarized messages from history to save space
-- **Memory integration**: Summaries are automatically included in context for future conversations
-- **Configuration**: Adjust `summarize_threshold` and `summarize_batch_size` in config, or disable with `auto_summarize_enabled: false`
-
-This ensures the bot can maintain long-term context while keeping the conversation history manageable.
-
-### Data Persistence
-
-All chat data is automatically persisted to disk:
-
-- **Storage location**: `~/.tbot-data.json` (configurable)
-- **What's saved**: Memories, conversation history, per-user summaries, and runtime statistics for all chats
-- **Auto-save**: Changes are immediately saved to disk after each modification
-- **Auto-load**: Data is automatically loaded when the bot starts
-- **Atomic writes**: Uses temporary files to prevent data corruption
-- **Per-chat isolation**: Each chat's data is stored and restored independently
-
-The bot maintains continuity across restarts, remembering past conversations, accumulated memories, and usage statistics.
+# Run bot with debug logging
+uv run tbot-cli --token <token> --api-key <key> --verbose
+```
 
 ## Configuration
 
-The bot stores its configuration in `~/.tbot-config.json`. Here are the available settings:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `response_frequency` | 0.4 | Probability (0.0-1.0) of responding in group chats |
-| `persona` | "An affable research assistant..." | The bot's persona description |
-| `system_prompt` | "You are role-playing..." | System prompt for the LLM |
-| `llm_model` | "openai/gpt-4o-mini" | OpenRouter model to use |
-| `max_context_messages` | 12 | Number of recent messages to include in LLM context |
-| `auto_summarize_enabled` | true | Enable/disable automatic summarization |
-| `summarize_threshold` | 18 | Number of messages that triggers summarization |
-| `summarize_batch_size` | 10 | Number of oldest messages to summarize at once |
-| `max_summarized_users` | 10 | Maximum number of users to keep summaries for |
-| `reactions_enabled` | true | Enable/disable emoji reactions to messages |
-| `reaction_frequency` | 0.3 | Probability (0.0-1.0) of adding a reaction to user messages |
-| `explicit_optin` | false | Enable explicit opt-in mode (bot only interacts with opted-in users in groups) |
-
-You can edit the config file directly or use Telegram commands to update settings.
+Config stored in `~/.tbot-config.json`. Key settings:
+- `response_frequency`: Reply probability in groups (0.0-1.0)
+- `persona`: Bot personality description
+- `llm_model`: OpenRouter model to use
+- `explicit_optin`: Privacy mode requiring user opt-in
 
 ## Telegram Commands
 
-Configure and monitor the bot directly from Telegram:
+`/config` - Show settings
+`/set <param> <value>` - Update setting
+`/persona` - Show persona
+`/summary` - Chat summaries
+`/forget` - Reset memory
+`/stat` - Usage statistics
+`/help` - Command help
 
-- `/persona` - Show current persona description
-- `/config` - List all tunable parameters and their current values
-- `/set <param> <value>` - Set any configuration parameter (e.g., `/set response_frequency 0.5`)
-- `/summary` - Display current chat conversation summaries
-- `/forget` - Reset chat memory, history, and summaries
-- `/stat` - Show runtime statistics (replies, reactions, LLM calls, tokens used)
-- `/memory add|list|clear` - Manage long-term memories
-- `/ask_optin` - Request users to opt-in to bot interactions (only in groups, when `explicit_optin` is enabled)
-- `/help` - Show command help
+## Contributing
 
+1. Fork and clone
+2. `uv sync --dev`
+3. Make changes
+4. `uv run pytest`
+5. Submit PR
