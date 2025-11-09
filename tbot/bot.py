@@ -236,10 +236,10 @@ def create_application(
         if not argument:
             await message.reply_text(
                 "Usage: /set <param> <value>\n"
-                "Available parameters: response_frequency, llm_model, max_context_messages, "
+                "Available parameters: response_frequency, max_context_messages, "
                 "auto_summarize_enabled, summarize_threshold, summarize_batch_size, "
                 "max_summarized_users, reactions_enabled, reaction_frequency, "
-                "explicit_optin, persona, system_prompt"
+                "explicit_optin"
             )
             return
 
@@ -267,8 +267,6 @@ def create_application(
                 "explicit_optin",
             ]:
                 value = value_str.lower() in ["true", "1", "yes", "on"]
-            elif param in ["persona", "system_prompt", "llm_model"]:
-                value = value_str
             else:
                 await message.reply_text(f"Unknown parameter: {param}")
                 return
