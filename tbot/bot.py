@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import random
+from datetime import datetime
 
 from telegram import Message, Update
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
@@ -145,7 +146,11 @@ async def _maybe_auto_summarize(
         # Store each user's summary
         for username, summary in user_summaries.items():
             clean_summary = ConversationContextBuilder.strip_bot_prefix(summary)
-            memory_manager.add_user_summary(chat_id, username, clean_summary)
+            # TODO: Could be improved by taking server side timestamp?
+            last_active = datetime.utcnow()
+            memory_manager.add_user_summary(
+                chat_id, username, clean_summary, last_active
+            )
             logger.debug(f"Stored summary for user {username}: {clean_summary[:50]}...")
 
         # Clear the summarized messages from history

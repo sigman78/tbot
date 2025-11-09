@@ -4,6 +4,8 @@ from pathlib import Path
 
 from tbot.memory import MemoryManager
 
+from .utils import next_timestamp_generator
+
 
 def test_memory_manager_stores_entries(tmp_path: Path) -> None:
     storage_path = tmp_path / "test_data.json"
@@ -246,9 +248,12 @@ def test_user_summaries_basic(tmp_path: Path) -> None:
     )
     chat_id = 100
 
-    # Add summaries for users
-    manager.add_user_summary(chat_id, "Alice", "Alice discussed Python programming")
-    manager.add_user_summary(chat_id, "Bob", "Bob asked about testing")
+    # Add summaries for users with explicit timestamps to ensure consistent ordering
+    next_ts = next_timestamp_generator()
+    manager.add_user_summary(
+        chat_id, "Alice", "Alice discussed Python programming", next_ts()
+    )
+    manager.add_user_summary(chat_id, "Bob", "Bob asked about testing", next_ts())
 
     # Get summaries
     summaries = manager.get_user_summaries(chat_id)
@@ -268,11 +273,12 @@ def test_user_summaries_update(tmp_path: Path) -> None:
     )
     chat_id = 100
 
-    # Add initial summary
-    manager.add_user_summary(chat_id, "Alice", "Initial summary")
+    # Add initial summary with explicit timestamp
+    next_ts = next_timestamp_generator()
+    manager.add_user_summary(chat_id, "Alice", "Initial summary", next_ts())
 
-    # Update summary for same user
-    manager.add_user_summary(chat_id, "Alice", "Updated summary")
+    # Update summary for same user with later timestamp
+    manager.add_user_summary(chat_id, "Alice", "Updated summary", next_ts())
 
     summaries = manager.get_user_summaries(chat_id)
     assert len(summaries) == 1
@@ -288,12 +294,13 @@ def test_user_summaries_max_limit(tmp_path: Path) -> None:
     )
     chat_id = 100
 
-    # Add 5 users (exceeds limit of 3)
-    manager.add_user_summary(chat_id, "User1", "Summary 1")
-    manager.add_user_summary(chat_id, "User2", "Summary 2")
-    manager.add_user_summary(chat_id, "User3", "Summary 3")
-    manager.add_user_summary(chat_id, "User4", "Summary 4")
-    manager.add_user_summary(chat_id, "User5", "Summary 5")
+    # Add 5 users with explicit timestamps to ensure reliable ordering
+    next_ts = next_timestamp_generator()
+    manager.add_user_summary(chat_id, "User1", "Summary 1", next_ts())
+    manager.add_user_summary(chat_id, "User2", "Summary 2", next_ts())
+    manager.add_user_summary(chat_id, "User3", "Summary 3", next_ts())
+    manager.add_user_summary(chat_id, "User4", "Summary 4", next_ts())
+    manager.add_user_summary(chat_id, "User5", "Summary 5", next_ts())
 
     # Should only keep the 3 most recent users
     summaries = manager.get_user_summaries(chat_id)
@@ -317,9 +324,10 @@ def test_user_summaries_per_chat(tmp_path: Path) -> None:
         storage_path=storage_path, auto_save=False, max_summarized_users=5
     )
 
-    manager.add_user_summary(111, "Alice", "Alice in chat 111")
-    manager.add_user_summary(222, "Alice", "Alice in chat 222")
-    manager.add_user_summary(111, "Bob", "Bob in chat 111")
+    next_ts = next_timestamp_generator()
+    manager.add_user_summary(111, "Alice", "Alice in chat 111", next_ts())
+    manager.add_user_summary(222, "Alice", "Alice in chat 222", next_ts())
+    manager.add_user_summary(111, "Bob", "Bob in chat 111", next_ts())
 
     chat111_summaries = manager.get_user_summaries(111)
     chat222_summaries = manager.get_user_summaries(222)
@@ -338,8 +346,9 @@ def test_user_summaries_clear(tmp_path: Path) -> None:
     )
     chat_id = 100
 
-    manager.add_user_summary(chat_id, "Alice", "Summary for Alice")
-    manager.add_user_summary(chat_id, "Bob", "Summary for Bob")
+    next_ts = next_timestamp_generator()
+    manager.add_user_summary(chat_id, "Alice", "Summary for Alice", next_ts())
+    manager.add_user_summary(chat_id, "Bob", "Summary for Bob", next_ts())
 
     assert len(manager.get_user_summaries(chat_id)) == 2
 
@@ -356,9 +365,15 @@ def test_user_summaries_persistence(tmp_path: Path) -> None:
     manager1 = MemoryManager(
         storage_path=storage_path, auto_save=False, max_summarized_users=5
     )
-    manager1.add_user_summary(100, "Alice", "Alice discussed Python")
-    manager1.add_user_summary(100, "Bob", "Bob asked about testing")
-    manager1.add_user_summary(200, "Charlie", "Charlie in different chat")
+    next_ts = next_timestamp_generator()
+    manager1.add_user_summary(100, "Alice", "Alice discussed Python", next_ts())
+    manager1.add_user_summary(100, "Bob", "Bob asked about testing", next_ts())
+    manager1.add_user_summary(
+        200,
+        "Charlie",
+        "Charlie in different chat",
+        next_ts(),
+    )
     manager1.save()
 
     # Load in new manager
@@ -377,3 +392,36 @@ def test_user_summaries_persistence(tmp_path: Path) -> None:
     chat200_summaries = manager2.get_user_summaries(200)
     assert len(chat200_summaries) == 1
     assert chat200_summaries[0].username == "Charlie"
+
+
+def test_user_summaries_explicit_timestamps_fix_ordering(tmp_path: Path) -> None:
+    """Test that explicit timestamps fix ordering issues when calls happen in quick succession."""
+    storage_path = tmp_path / "test_data.json"
+    manager = MemoryManager(
+        storage_path=storage_path, auto_save=False, max_summarized_users=5
+    )
+    chat_id = 100
+
+    # Add summaries with explicit timestamps to ensure consistent ordering
+    # even when called in rapid succession
+    # Add multiple users with very close but distinct timestamps
+    next_ts = next_timestamp_generator()
+
+    # Add multiple users with very close but distinct timestamps
+    manager.add_user_summary(chat_id, "User1", "Summary 1", next_ts())
+    manager.add_user_summary(chat_id, "User2", "Summary 2", next_ts())
+    manager.add_user_summary(chat_id, "User3", "Summary 3", next_ts())
+
+    summaries = manager.get_user_summaries(chat_id)
+    assert len(summaries) == 3
+
+    # Should be ordered by last_active (most recent first)
+    usernames = [s.username for s in summaries]
+    assert usernames == ["User3", "User2", "User1"]  # Reverse chronological order
+
+    # Update User1 with a newer timestamp
+    manager.add_user_summary(chat_id, "User1", "Updated summary", next_ts())
+
+    summaries = manager.get_user_summaries(chat_id)
+    usernames = [s.username for s in summaries]
+    assert usernames == ["User1", "User3", "User2"]  # User1 should now be first

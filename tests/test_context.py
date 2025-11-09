@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from tbot.config import BotConfig
 from tbot.context import ConversationContextBuilder
 from tbot.memory import MemoryEntry
+
+from .utils import next_timestamp_generator
 
 
 def test_format_user_message() -> None:
@@ -133,8 +133,8 @@ def test_context_includes_system_prompt_and_persona() -> None:
 
     # Check system prompt includes persona
     assert messages[0]["role"] == "system"
-    assert "You are helpful and kind." == messages[0]["content"]
-    assert "A friendly assistant" == messages[0]["content"]
+    assert "You are helpful and kind." in messages[0]["content"]
+    assert "A friendly assistant" in messages[0]["content"]
 
 
 def test_context_includes_memories() -> None:
@@ -142,11 +142,10 @@ def test_context_includes_memories() -> None:
     builder = ConversationContextBuilder(is_group_chat=False)
 
     config = BotConfig()
+    next_ts = next_timestamp_generator()
     memories = [
-        MemoryEntry(chat_id=123, text="User likes pizza", created_at=datetime.utcnow()),
-        MemoryEntry(
-            chat_id=123, text="User is a developer", created_at=datetime.utcnow()
-        ),
+        MemoryEntry(chat_id=123, text="User likes pizza", created_at=next_ts()),
+        MemoryEntry(chat_id=123, text="User is a developer", created_at=next_ts()),
     ]
 
     messages = builder.build_messages(
@@ -161,8 +160,8 @@ def test_context_includes_memories() -> None:
 
     # Check memories are included
     assert messages[1]["role"] == "system"
-    assert "User likes pizza" == messages[1]["content"]
-    assert "User is a developer" == messages[1]["content"]
+    assert "User likes pizza" in messages[1]["content"]
+    assert "User is a developer" in messages[1]["content"]
 
 
 def test_context_with_no_memories() -> None:

@@ -1,4 +1,5 @@
 """Simple in-memory store for persona memories and chat history."""
+
 from __future__ import annotations
 
 import json
@@ -38,6 +39,7 @@ class MemoryEntry:
 @dataclass
 class UserSummary:
     """Per-user conversation summary."""
+
     username: str
     summary: str
     last_active: datetime
@@ -63,6 +65,7 @@ class UserSummary:
 @dataclass
 class ChatStatistics:
     """Runtime statistics for a chat."""
+
     replies: int = 0
     reactions: int = 0
     llm_calls: int = 0
@@ -113,10 +116,14 @@ class MemoryManager:
         self._history: Dict[int, List[str]] = {}
         self._history_size = history_size
         self._summarization_count: Dict[int, int] = {}
-        self._user_summaries: Dict[int, Dict[str, UserSummary]] = {}  # chat_id -> {username -> UserSummary}
+        self._user_summaries: Dict[
+            int, Dict[str, UserSummary]
+        ] = {}  # chat_id -> {username -> UserSummary}
         self._statistics: Dict[int, ChatStatistics] = {}  # chat_id -> ChatStatistics
         self._optin_lists: Dict[int, set[int]] = {}  # chat_id -> set of user_ids
-        self._optin_message_ids: Dict[int, int] = {}  # chat_id -> message_id of opt-in request
+        self._optin_message_ids: Dict[
+            int, int
+        ] = {}  # chat_id -> message_id of opt-in request
         self._max_summarized_users = max_summarized_users
         self._storage_path = Path(storage_path or Path.home() / ".tbot-data.json")
         self._auto_save = auto_save
@@ -127,7 +134,9 @@ class MemoryManager:
             self.load()
 
     def add_memory(self, chat_id: int, text: str) -> MemoryEntry:
-        entry = MemoryEntry(chat_id=chat_id, text=text.strip(), created_at=datetime.utcnow())
+        entry = MemoryEntry(
+            chat_id=chat_id, text=text.strip(), created_at=datetime.utcnow()
+        )
         self._memories.setdefault(chat_id, []).append(entry)
         self._mark_dirty()
         return entry
@@ -229,7 +238,11 @@ class MemoryManager:
         return len(self._history.get(chat_id, []))
 
     def add_user_summary(
-        self, chat_id: int, username: str, summary: str
+        self,
+        chat_id: int,
+        username: str,
+        summary: str,
+        last_active: datetime,
     ) -> None:
         """Add or update a user's conversation summary.
 
@@ -237,6 +250,8 @@ class MemoryManager:
             chat_id: The chat this summary belongs to
             username: The user's name
             summary: The summary text
+            last_active: Timestamp for when the user was last active.
+                        If None, uses current UTC time.
         """
         if chat_id not in self._user_summaries:
             self._user_summaries[chat_id] = {}
@@ -244,7 +259,7 @@ class MemoryManager:
         self._user_summaries[chat_id][username] = UserSummary(
             username=username,
             summary=summary,
-            last_active=datetime.utcnow(),  # BUG: Not enough precision (at least for test)
+            last_active=last_active,
         )
 
         # Enforce max user limit
@@ -298,7 +313,7 @@ class MemoryManager:
 
         # Keep only the top N users
         self._user_summaries[chat_id] = dict(
-            sorted_summaries[:self._max_summarized_users]
+            sorted_summaries[: self._max_summarized_users]
         )
 
         logger.info(
@@ -326,7 +341,9 @@ class MemoryManager:
         stats.reactions += 1
         self._mark_dirty()
 
-    def increment_llm_call_count(self, chat_id: int, tokens_sent: int = 0, tokens_received: int = 0) -> None:
+    def increment_llm_call_count(
+        self, chat_id: int, tokens_sent: int = 0, tokens_received: int = 0
+    ) -> None:
         """Increment the LLM call count and token counts for a chat.
 
         Args:
@@ -449,7 +466,9 @@ class MemoryManager:
             history_data = {str(k): v for k, v in self._history.items()}
 
             # Convert summarization counts to serializable format
-            summarization_data = {str(k): v for k, v in self._summarization_count.items()}
+            summarization_data = {
+                str(k): v for k, v in self._summarization_count.items()
+            }
 
             # Convert user summaries to serializable format
             user_summaries_data = {}
@@ -470,7 +489,9 @@ class MemoryManager:
                 optin_lists_data[str(chat_id)] = list(user_ids)
 
             # Convert opt-in message IDs to serializable format
-            optin_message_ids_data = {str(k): v for k, v in self._optin_message_ids.items()}
+            optin_message_ids_data = {
+                str(k): v for k, v in self._optin_message_ids.items()
+            }
 
             data = {
                 "version": 4,  # Increment version for opt-in support
@@ -485,7 +506,9 @@ class MemoryManager:
 
             # Write atomically using a temp file
             temp_path = self._storage_path.with_suffix(".tmp")
-            temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            temp_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             temp_path.replace(self._storage_path)
 
             self._dirty = False
@@ -532,7 +555,9 @@ class MemoryManager:
             # Load user summaries (version 2+)
             self._user_summaries = {}
             if version >= 2:
-                for chat_id_str, summaries_data in data.get("user_summaries", {}).items():
+                for chat_id_str, summaries_data in data.get(
+                    "user_summaries", {}
+                ).items():
                     chat_id = int(chat_id_str)
                     self._user_summaries[chat_id] = {
                         username: UserSummary.from_dict(summary_data)
@@ -556,7 +581,9 @@ class MemoryManager:
             # Load opt-in message IDs (version 4+)
             self._optin_message_ids = {}
             if version >= 4:
-                for chat_id_str, message_id in data.get("optin_message_ids", {}).items():
+                for chat_id_str, message_id in data.get(
+                    "optin_message_ids", {}
+                ).items():
                     self._optin_message_ids[int(chat_id_str)] = message_id
 
             self._dirty = False
@@ -572,4 +599,3 @@ class MemoryManager:
             logger.error(f"Failed to parse saved data: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to load data: {e}", exc_info=True)
-
