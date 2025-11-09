@@ -57,7 +57,8 @@ def test_private_chat_strips_user_prefix() -> None:
 
     # Check bot messages have prefix stripped
     assert messages[2]["role"] == "assistant"
-    assert messages[2]["content"] == "Hi there!"
+    # TODO: Too strict, look up later
+    assert messages[2]["content"] == "Hi there!"  # pyright: ignore[reportTypedDictNotRequiredAccess]
 
     # Check second user message
     assert messages[3]["role"] == "user"
@@ -98,7 +99,7 @@ def test_group_chat_preserves_user_names() -> None:
 
     # Check bot message has prefix stripped
     assert messages[2]["role"] == "assistant"
-    assert messages[2]["content"] == "Im good, you?"
+    assert messages[2]["content"] == "Im good, you?"  # pyright: ignore[reportTypedDictNotRequiredAccess]
 
     # Check second user message preserves name
     assert messages[3]["role"] == "user"
@@ -106,7 +107,7 @@ def test_group_chat_preserves_user_names() -> None:
 
     # Check second bot message
     assert messages[4]["role"] == "assistant"
-    assert messages[4]["content"] == "Good good!"
+    assert messages[4]["content"] == "Good good!"  # pyright: ignore[reportTypedDictNotRequiredAccess]
 
 
 def test_context_includes_system_prompt_and_persona() -> None:
