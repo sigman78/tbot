@@ -1,4 +1,5 @@
 """Tests for conversation context builder."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -132,8 +133,8 @@ def test_context_includes_system_prompt_and_persona() -> None:
 
     # Check system prompt includes persona
     assert messages[0]["role"] == "system"
-    assert "You are helpful and kind." in messages[0]["content"]
-    assert "A friendly assistant" in messages[0]["content"]
+    assert "You are helpful and kind." == messages[0]["content"]
+    assert "A friendly assistant" == messages[0]["content"]
 
 
 def test_context_includes_memories() -> None:
@@ -143,7 +144,9 @@ def test_context_includes_memories() -> None:
     config = BotConfig()
     memories = [
         MemoryEntry(chat_id=123, text="User likes pizza", created_at=datetime.utcnow()),
-        MemoryEntry(chat_id=123, text="User is a developer", created_at=datetime.utcnow()),
+        MemoryEntry(
+            chat_id=123, text="User is a developer", created_at=datetime.utcnow()
+        ),
     ]
 
     messages = builder.build_messages(
@@ -158,8 +161,8 @@ def test_context_includes_memories() -> None:
 
     # Check memories are included
     assert messages[1]["role"] == "system"
-    assert "User likes pizza" in messages[1]["content"]
-    assert "User is a developer" in messages[1]["content"]
+    assert "User likes pizza" == messages[1]["content"]
+    assert "User is a developer" == messages[1]["content"]
 
 
 def test_context_with_no_memories() -> None:
@@ -249,5 +252,5 @@ def test_group_chat_sample_conversation() -> None:
     # Verify bot messages have prefix stripped
     bot_messages = [m for m in messages if m["role"] == "assistant"]
     assert len(bot_messages) == 2
-    assert bot_messages[0]["content"] == "Im good, you?"
-    assert bot_messages[1]["content"] == "Good good!"
+    assert bot_messages[0]["content"] == "Im good, you?"  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    assert bot_messages[1]["content"] == "Good good!"  # pyright: ignore[reportTypedDictNotRequiredAccess]

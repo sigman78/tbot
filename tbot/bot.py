@@ -441,7 +441,7 @@ def create_application(
             return
 
         # Extract emoji strings from reactions (filters out non-emoji reactions)
-        emojis = extract_emojis_from_reactions(new_reactions)
+        emojis = extract_emojis_from_reactions(list(new_reactions))
 
         # Check if any of the new emojis are positive
         if any(emoji in POSITIVE_REACTIONS for emoji in emojis):
