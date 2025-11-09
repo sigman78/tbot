@@ -37,9 +37,36 @@ class MemoryEntry:
 
 
 @dataclass
+class HistoryMessage:
+    """A message in chat history with metadata."""
+
+    text: str
+    user_id: int | None  # None for bot messages
+    timestamp: datetime
+
+    def to_dict(self) -> dict:
+        """Serialize to dictionary for JSON storage."""
+        return {
+            "text": self.text,
+            "user_id": self.user_id,
+            "timestamp": self.timestamp.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "HistoryMessage":
+        """Deserialize from dictionary."""
+        return cls(
+            text=data["text"],
+            user_id=data.get("user_id"),
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+        )
+
+
+@dataclass
 class UserSummary:
     """Per-user conversation summary."""
 
+    user_id: int  # Track user ID for privacy enforcement
     username: str
     summary: str
     last_active: datetime
@@ -47,6 +74,7 @@ class UserSummary:
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSON storage."""
         return {
+            "user_id": self.user_id,
             "username": self.username,
             "summary": self.summary,
             "last_active": self.last_active.isoformat(),
@@ -56,6 +84,7 @@ class UserSummary:
     def from_dict(cls, data: dict) -> "UserSummary":
         """Deserialize from dictionary."""
         return cls(
+            user_id=data["user_id"],
             username=data["username"],
             summary=data["summary"],
             last_active=datetime.fromisoformat(data["last_active"]),
@@ -103,6 +132,7 @@ class MemoryManager:
         storage_path: Path | str | None = None,
         auto_save: bool = True,
         max_summarized_users: int = 10,
+        explicit_optin_mode: bool = False,
     ) -> None:
         """Initialize the memory manager.
 
@@ -111,9 +141,10 @@ class MemoryManager:
             storage_path: Path to persistence file (default: ~/.tbot-data.json)
             auto_save: Whether to auto-save after changes
             max_summarized_users: Maximum number of users to keep summaries for
+            explicit_optin_mode: If True, enforce opt-in policy at storage layer
         """
         self._memories: Dict[int, List[MemoryEntry]] = {}
-        self._history: Dict[int, List[str]] = {}
+        self._history: Dict[int, List[HistoryMessage]] = {}
         self._history_size = history_size
         self._summarization_count: Dict[int, int] = {}
         self._user_summaries: Dict[
@@ -124,7 +155,11 @@ class MemoryManager:
         self._optin_message_ids: Dict[
             int, int
         ] = {}  # chat_id -> message_id of opt-in request
+        self._username_to_userid: Dict[
+            int, Dict[str, int]
+        ] = {}  # chat_id -> {username -> user_id}
         self._max_summarized_users = max_summarized_users
+        self._explicit_optin_mode = explicit_optin_mode
         self._storage_path = Path(storage_path or Path.home() / ".tbot-data.json")
         self._auto_save = auto_save
         self._dirty = False  # Track if data has changed since last save
@@ -148,18 +183,88 @@ class MemoryManager:
         self._memories.pop(chat_id, None)
         self._mark_dirty()
 
-    def append_history(self, chat_id: int, message: str) -> None:
+    def append_history(
+        self,
+        chat_id: int,
+        message: str,
+        user_id: int | None = None,
+        is_group_chat: bool = False,
+        username: str | None = None,
+    ) -> bool:
+        """Append a message to chat history.
+
+        Args:
+            chat_id: The chat ID
+            message: The formatted message text
+            user_id: The user who sent the message (None for bot messages)
+            is_group_chat: Whether this is a group/supergroup chat
+            username: The username of the sender (for tracking user_id mapping)
+
+        Returns:
+            True if message was stored, False if rejected due to opt-in policy
+        """
+        # PRIVACY ENFORCEMENT: In explicit opt-in mode, reject non-opted-in users
+        if self._explicit_optin_mode and is_group_chat and user_id is not None:
+            if not self.is_user_opted_in(chat_id, user_id):
+                logger.debug(
+                    f"Rejecting message storage from non-opted-in user {user_id} "
+                    f"in chat {chat_id}"
+                )
+                return False
+
+        # Track username -> user_id mapping for summarization
+        if user_id is not None and username is not None:
+            if chat_id not in self._username_to_userid:
+                self._username_to_userid[chat_id] = {}
+            self._username_to_userid[chat_id][username] = user_id
+
         history = self._history.setdefault(chat_id, [])
-        history.append(message)
+        history_msg = HistoryMessage(
+            text=message,
+            user_id=user_id,
+            timestamp=datetime.utcnow(),
+        )
+        history.append(history_msg)
+
         if len(history) > self._history_size:
             del history[: len(history) - self._history_size]
-        self._mark_dirty()
 
-    def get_history(self, chat_id: int, limit: int | None = None) -> List[str]:
+        self._mark_dirty()
+        return True
+
+    def get_history(
+        self, chat_id: int, limit: int | None = None, is_group_chat: bool = False
+    ) -> List[str]:
+        """Get chat history, filtered by opt-in status if applicable.
+
+        Args:
+            chat_id: The chat ID
+            limit: Maximum number of messages to return
+            is_group_chat: Whether this is a group/supergroup chat
+
+        Returns:
+            List of message strings
+        """
         history = self._history.get(chat_id, [])
-        if limit is None:
-            return list(history)
-        return history[-limit:]
+
+        # PRIVACY FILTER: In explicit opt-in mode for groups, only return messages
+        # from opted-in users (or bot messages)
+        if self._explicit_optin_mode and is_group_chat:
+            opted_in_users = self._optin_lists.get(chat_id, set())
+            filtered_history = [
+                msg
+                for msg in history
+                if msg.user_id is None or msg.user_id in opted_in_users
+            ]
+        else:
+            filtered_history = history
+
+        # Apply limit
+        if limit is not None:
+            filtered_history = filtered_history[-limit:]
+
+        # Return just the text strings
+        return [msg.text for msg in filtered_history]
 
     def should_summarize(self, chat_id: int, threshold: int) -> bool:
         """Check if chat history has reached the summarization threshold.
@@ -191,7 +296,7 @@ class MemoryManager:
             return [], 0
 
         # Get the oldest batch_size messages
-        messages_to_summarize = history[:batch_size]
+        messages_to_summarize = [msg.text for msg in history[:batch_size]]
         return messages_to_summarize, len(history)
 
     def clear_summarized_messages(self, chat_id: int, count: int) -> None:
@@ -240,23 +345,39 @@ class MemoryManager:
     def add_user_summary(
         self,
         chat_id: int,
+        user_id: int,
         username: str,
         summary: str,
         last_active: datetime,
-    ) -> None:
+        is_group_chat: bool = False,
+    ) -> bool:
         """Add or update a user's conversation summary.
 
         Args:
             chat_id: The chat this summary belongs to
+            user_id: The user's ID
             username: The user's name
             summary: The summary text
             last_active: Timestamp for when the user was last active.
                         If None, uses current UTC time.
+            is_group_chat: Whether this is a group/supergroup chat
+
+        Returns:
+            True if summary was stored, False if rejected due to opt-in policy
         """
+        # PRIVACY ENFORCEMENT
+        if self._explicit_optin_mode and is_group_chat:
+            if not self.is_user_opted_in(chat_id, user_id):
+                logger.debug(
+                    f"Rejecting summary storage for non-opted-in user {user_id}"
+                )
+                return False
+
         if chat_id not in self._user_summaries:
             self._user_summaries[chat_id] = {}
 
         self._user_summaries[chat_id][username] = UserSummary(
+            user_id=user_id,
             username=username,
             summary=summary,
             last_active=last_active,
@@ -265,6 +386,7 @@ class MemoryManager:
         # Enforce max user limit
         self._cleanup_old_user_summaries(chat_id)
         self._mark_dirty()
+        return True
 
     def get_user_summaries(self, chat_id: int) -> List[UserSummary]:
         """Get all user summaries for a chat, ordered by last active.
@@ -413,6 +535,63 @@ class MemoryManager:
         """
         return self._optin_lists.get(chat_id, set()).copy()
 
+    def get_user_id_from_username(self, chat_id: int, username: str) -> int | None:
+        """Get user_id from username mapping.
+
+        Args:
+            chat_id: The chat ID
+            username: The username to look up
+
+        Returns:
+            The user_id if found, otherwise None
+        """
+        return self._username_to_userid.get(chat_id, {}).get(username)
+
+    def remove_user_from_optin(self, chat_id: int, user_id: int) -> None:
+        """Remove a user from opt-in list and purge their data.
+
+        This method enforces privacy by:
+        1. Removing user from the opt-in list
+        2. Purging their messages from history
+        3. Removing their user summary
+
+        Args:
+            chat_id: The chat ID
+            user_id: The user ID to remove
+        """
+        # Remove from opt-in list
+        if chat_id in self._optin_lists:
+            self._optin_lists[chat_id].discard(user_id)
+
+        # Purge their messages from history
+        if chat_id in self._history:
+            original_len = len(self._history[chat_id])
+            self._history[chat_id] = [
+                msg for msg in self._history[chat_id] if msg.user_id != user_id
+            ]
+            removed = original_len - len(self._history[chat_id])
+            if removed > 0:
+                logger.info(
+                    f"Removed {removed} messages from user {user_id} in chat {chat_id}"
+                )
+
+        # Remove from user summaries
+        if chat_id in self._user_summaries:
+            # Find and remove summary by user_id
+            summaries_to_remove = [
+                username
+                for username, summary in self._user_summaries[chat_id].items()
+                if summary.user_id == user_id
+            ]
+            for username in summaries_to_remove:
+                del self._user_summaries[chat_id][username]
+                logger.info(
+                    f"Removed summary for user {user_id} ({username}) in chat {chat_id}"
+                )
+
+        self._mark_dirty()
+        logger.info(f"User {user_id} fully removed from chat {chat_id}")
+
     def set_optin_message_id(self, chat_id: int, message_id: int) -> None:
         """Store the message ID of the opt-in request.
 
@@ -462,8 +641,10 @@ class MemoryManager:
             for chat_id, entries in self._memories.items():
                 memories_data[str(chat_id)] = [entry.to_dict() for entry in entries]
 
-            # Convert history to serializable format (already strings)
-            history_data = {str(k): v for k, v in self._history.items()}
+            # Convert history to serializable format (now HistoryMessage objects)
+            history_data = {}
+            for chat_id, messages in self._history.items():
+                history_data[str(chat_id)] = [msg.to_dict() for msg in messages]
 
             # Convert summarization counts to serializable format
             summarization_data = {
@@ -493,8 +674,13 @@ class MemoryManager:
                 str(k): v for k, v in self._optin_message_ids.items()
             }
 
+            # Convert username to user_id mapping to serializable format
+            username_to_userid_data = {}
+            for chat_id, mapping in self._username_to_userid.items():
+                username_to_userid_data[str(chat_id)] = mapping
+
             data = {
-                "version": 4,  # Increment version for opt-in support
+                "version": 5,  # Version 5: HistoryMessage structure + user_id in UserSummary + username mapping
                 "memories": memories_data,
                 "history": history_data,
                 "summarization_count": summarization_data,
@@ -502,6 +688,7 @@ class MemoryManager:
                 "statistics": statistics_data,
                 "optin_lists": optin_lists_data,
                 "optin_message_ids": optin_message_ids_data,
+                "username_to_userid": username_to_userid_data,
             }
 
             # Write atomically using a temp file
@@ -530,7 +717,7 @@ class MemoryManager:
 
             # Validate version (for future migrations)
             version = data.get("version", 1)
-            if version not in [1, 2, 3, 4]:
+            if version not in [1, 2, 3, 4, 5]:
                 logger.warning(f"Unknown data version {version}, skipping load")
                 return
 
@@ -542,27 +729,67 @@ class MemoryManager:
                     MemoryEntry.from_dict(entry) for entry in entries_data
                 ]
 
-            # Load history
+            # Load history (with migration from older versions)
             self._history = {}
             for chat_id_str, messages in data.get("history", {}).items():
-                self._history[int(chat_id_str)] = messages
+                chat_id = int(chat_id_str)
+
+                if version >= 5:
+                    # New format: list of HistoryMessage dicts
+                    self._history[chat_id] = [
+                        HistoryMessage.from_dict(msg) for msg in messages
+                    ]
+                else:
+                    # Old format: list of strings (migrate to new format)
+                    # Assume all old messages are from unknown users
+                    self._history[chat_id] = [
+                        HistoryMessage(
+                            text=msg,
+                            user_id=None,  # Unknown user for migrated data
+                            timestamp=datetime.utcnow(),
+                        )
+                        for msg in messages
+                    ]
+                    logger.debug(
+                        f"Migrated {len(messages)} history messages for chat {chat_id} "
+                        f"from version {version} to version 5"
+                    )
 
             # Load summarization counts
             self._summarization_count = {}
             for chat_id_str, count in data.get("summarization_count", {}).items():
                 self._summarization_count[int(chat_id_str)] = count
 
-            # Load user summaries (version 2+)
+            # Load user summaries (version 2+, with migration for version 5)
             self._user_summaries = {}
             if version >= 2:
                 for chat_id_str, summaries_data in data.get(
                     "user_summaries", {}
                 ).items():
                     chat_id = int(chat_id_str)
-                    self._user_summaries[chat_id] = {
-                        username: UserSummary.from_dict(summary_data)
-                        for username, summary_data in summaries_data.items()
-                    }
+                    self._user_summaries[chat_id] = {}
+
+                    for username, summary_data in summaries_data.items():
+                        if version >= 5:
+                            # Version 5+: user_id is included
+                            self._user_summaries[chat_id][username] = (
+                                UserSummary.from_dict(summary_data)
+                            )
+                        else:
+                            # Version 2-4: user_id not present, use placeholder
+                            # These summaries will be naturally replaced as users interact
+                            self._user_summaries[chat_id][username] = UserSummary(
+                                user_id=0,  # Placeholder for migrated data
+                                username=summary_data["username"],
+                                summary=summary_data["summary"],
+                                last_active=datetime.fromisoformat(
+                                    summary_data["last_active"]
+                                ),
+                            )
+                            logger.debug(
+                                f"Migrated user summary for {username} in chat {chat_id} "
+                                f"from version {version} to version 5 (user_id set to 0)"
+                            )
 
             # Load statistics (version 3+)
             self._statistics = {}
@@ -585,6 +812,13 @@ class MemoryManager:
                     "optin_message_ids", {}
                 ).items():
                     self._optin_message_ids[int(chat_id_str)] = message_id
+
+            # Load username to user_id mapping (version 5+)
+            self._username_to_userid = {}
+            if version >= 5:
+                for chat_id_str, mapping in data.get("username_to_userid", {}).items():
+                    chat_id = int(chat_id_str)
+                    self._username_to_userid[chat_id] = mapping
 
             self._dirty = False
             logger.info(

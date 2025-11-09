@@ -251,9 +251,9 @@ def test_user_summaries_basic(tmp_path: Path) -> None:
     # Add summaries for users with explicit timestamps to ensure consistent ordering
     next_ts = next_timestamp_generator()
     manager.add_user_summary(
-        chat_id, "Alice", "Alice discussed Python programming", next_ts()
+        chat_id, 1, "Alice", "Alice discussed Python programming", next_ts()
     )
-    manager.add_user_summary(chat_id, "Bob", "Bob asked about testing", next_ts())
+    manager.add_user_summary(chat_id, 2, "Bob", "Bob asked about testing", next_ts())
 
     # Get summaries
     summaries = manager.get_user_summaries(chat_id)
@@ -275,10 +275,10 @@ def test_user_summaries_update(tmp_path: Path) -> None:
 
     # Add initial summary with explicit timestamp
     next_ts = next_timestamp_generator()
-    manager.add_user_summary(chat_id, "Alice", "Initial summary", next_ts())
+    manager.add_user_summary(chat_id, 1, "Alice", "Initial summary", next_ts())
 
     # Update summary for same user with later timestamp
-    manager.add_user_summary(chat_id, "Alice", "Updated summary", next_ts())
+    manager.add_user_summary(chat_id, 1, "Alice", "Updated summary", next_ts())
 
     summaries = manager.get_user_summaries(chat_id)
     assert len(summaries) == 1
@@ -296,11 +296,11 @@ def test_user_summaries_max_limit(tmp_path: Path) -> None:
 
     # Add 5 users with explicit timestamps to ensure reliable ordering
     next_ts = next_timestamp_generator()
-    manager.add_user_summary(chat_id, "User1", "Summary 1", next_ts())
-    manager.add_user_summary(chat_id, "User2", "Summary 2", next_ts())
-    manager.add_user_summary(chat_id, "User3", "Summary 3", next_ts())
-    manager.add_user_summary(chat_id, "User4", "Summary 4", next_ts())
-    manager.add_user_summary(chat_id, "User5", "Summary 5", next_ts())
+    manager.add_user_summary(chat_id, 1, "User1", "Summary 1", next_ts())
+    manager.add_user_summary(chat_id, 2, "User2", "Summary 2", next_ts())
+    manager.add_user_summary(chat_id, 3, "User3", "Summary 3", next_ts())
+    manager.add_user_summary(chat_id, 4, "User4", "Summary 4", next_ts())
+    manager.add_user_summary(chat_id, 5, "User5", "Summary 5", next_ts())
 
     # Should only keep the 3 most recent users
     summaries = manager.get_user_summaries(chat_id)
@@ -325,9 +325,9 @@ def test_user_summaries_per_chat(tmp_path: Path) -> None:
     )
 
     next_ts = next_timestamp_generator()
-    manager.add_user_summary(111, "Alice", "Alice in chat 111", next_ts())
-    manager.add_user_summary(222, "Alice", "Alice in chat 222", next_ts())
-    manager.add_user_summary(111, "Bob", "Bob in chat 111", next_ts())
+    manager.add_user_summary(111, 1, "Alice", "Alice in chat 111", next_ts())
+    manager.add_user_summary(222, 1, "Alice", "Alice in chat 222", next_ts())
+    manager.add_user_summary(111, 2, "Bob", "Bob in chat 111", next_ts())
 
     chat111_summaries = manager.get_user_summaries(111)
     chat222_summaries = manager.get_user_summaries(222)
@@ -347,8 +347,8 @@ def test_user_summaries_clear(tmp_path: Path) -> None:
     chat_id = 100
 
     next_ts = next_timestamp_generator()
-    manager.add_user_summary(chat_id, "Alice", "Summary for Alice", next_ts())
-    manager.add_user_summary(chat_id, "Bob", "Summary for Bob", next_ts())
+    manager.add_user_summary(chat_id, 1, "Alice", "Summary for Alice", next_ts())
+    manager.add_user_summary(chat_id, 2, "Bob", "Summary for Bob", next_ts())
 
     assert len(manager.get_user_summaries(chat_id)) == 2
 
@@ -366,10 +366,11 @@ def test_user_summaries_persistence(tmp_path: Path) -> None:
         storage_path=storage_path, auto_save=False, max_summarized_users=5
     )
     next_ts = next_timestamp_generator()
-    manager1.add_user_summary(100, "Alice", "Alice discussed Python", next_ts())
-    manager1.add_user_summary(100, "Bob", "Bob asked about testing", next_ts())
+    manager1.add_user_summary(100, 1, "Alice", "Alice discussed Python", next_ts())
+    manager1.add_user_summary(100, 2, "Bob", "Bob asked about testing", next_ts())
     manager1.add_user_summary(
         200,
+        3,
         "Charlie",
         "Charlie in different chat",
         next_ts(),
@@ -408,9 +409,9 @@ def test_user_summaries_explicit_timestamps_fix_ordering(tmp_path: Path) -> None
     next_ts = next_timestamp_generator()
 
     # Add multiple users with very close but distinct timestamps
-    manager.add_user_summary(chat_id, "User1", "Summary 1", next_ts())
-    manager.add_user_summary(chat_id, "User2", "Summary 2", next_ts())
-    manager.add_user_summary(chat_id, "User3", "Summary 3", next_ts())
+    manager.add_user_summary(chat_id, 1, "User1", "Summary 1", next_ts())
+    manager.add_user_summary(chat_id, 2, "User2", "Summary 2", next_ts())
+    manager.add_user_summary(chat_id, 3, "User3", "Summary 3", next_ts())
 
     summaries = manager.get_user_summaries(chat_id)
     assert len(summaries) == 3
@@ -420,7 +421,7 @@ def test_user_summaries_explicit_timestamps_fix_ordering(tmp_path: Path) -> None
     assert usernames == ["User3", "User2", "User1"]  # Reverse chronological order
 
     # Update User1 with a newer timestamp
-    manager.add_user_summary(chat_id, "User1", "Updated summary", next_ts())
+    manager.add_user_summary(chat_id, 1, "User1", "Updated summary", next_ts())
 
     summaries = manager.get_user_summaries(chat_id)
     usernames = [s.username for s in summaries]
