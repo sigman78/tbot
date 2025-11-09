@@ -1,14 +1,16 @@
 [project]
 name = "tbot"
-version = "0.1.0"
+dynamic = ["version"]
 description = "LLM-driven Telegram persona bot"
-authors = [{name = "Anton Stuk <sigman@ioupg.com>"}]
+authors = [{name = "Anton Stuk", email="sigman@ioupg.com"}]
 requires-python = ">=3.11"
+keywords = ["bot", "automation", "example"]
 dependencies = [
     "python-telegram-bot[async]>=20.6",
     "openai>=1.12.0",
     "click>=8.0.0",
 ]
+
 
 [project.optional-dependencies]
 dev = [
@@ -19,10 +21,19 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "tbot/__init__.py"
+
+[project.scripts]
+tbot-cli = "tbot.main:main"
+
 [tool.ruff]
 line-length = 88 # Example: Set a desired line length
 target-version = "py310" # Example: Target Python version
 select = ["E", "F", "I"] # Enable error, flake8, and import sorting rules
 ignore = ["E501", "COM812"]
 extend-select = ["I"] # Enable import sorting
-skip-magic-trailing-comma = true
+#skip-magic-trailing-comma = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

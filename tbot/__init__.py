@@ -8,6 +8,8 @@ from .config import BotConfig, ConfigManager
 from .llm_client import LLMClient
 from .memory import MemoryManager
 
+__version__ = "0.1.0"
+
 __all__ = [
     "BotConfig",
     "ConfigManager",
