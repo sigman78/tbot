@@ -150,11 +150,20 @@ async def _maybe_auto_summarize(
             clean_summary = ConversationContextBuilder.strip_bot_prefix(summary)
             # TODO: Could be improved by taking server side timestamp?
             last_active = datetime.utcnow()
-            # TODO: Track username to user_id mapping to use real user_id here
-            # For now, use 0 as placeholder (matches migration logic)
+
+            # Get user_id from username mapping (tracked during message storage)
+            user_id = memory_manager.get_user_id_from_username(chat_id, username)
+            if user_id is None:
+                # Fallback to 0 if username not found (shouldn't happen in normal flow)
+                logger.warning(
+                    f"Could not find user_id for username '{username}' in chat {chat_id}, "
+                    "using placeholder user_id=0"
+                )
+                user_id = 0
+
             memory_manager.add_user_summary(
                 chat_id,
-                user_id=0,  # Placeholder until we track username->user_id mapping
+                user_id=user_id,
                 username=username,
                 summary=clean_summary,
                 last_active=last_active,
@@ -550,6 +559,7 @@ def create_application(
             ConversationContextBuilder.format_user_message(user_name, text),
             user_id=user_id,
             is_group_chat=is_group_chat,
+            username=user_name,
         ):
             return
 

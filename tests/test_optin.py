@@ -347,3 +347,210 @@ def test_privacy_enforcement_persistence(tmp_path: Path):
     history = manager2.get_history(chat_id, is_group_chat=True)
     assert len(history) == 1
     assert "Hello" in history[0]
+
+
+def test_username_to_userid_mapping():
+    """Test that username to user_id mapping is tracked correctly."""
+    memory_manager = MemoryManager(auto_save=False, explicit_optin_mode=False)
+
+    chat_id = 12345
+    user_id_alice = 111
+    user_id_bob = 222
+
+    # Store messages with usernames
+    memory_manager.append_history(
+        chat_id,
+        "Alice: Hello",
+        user_id=user_id_alice,
+        is_group_chat=True,
+        username="Alice",
+    )
+    memory_manager.append_history(
+        chat_id,
+        "Bob: Hi there",
+        user_id=user_id_bob,
+        is_group_chat=True,
+        username="Bob",
+    )
+
+    # Verify mappings are tracked
+    assert memory_manager.get_user_id_from_username(chat_id, "Alice") == user_id_alice
+    assert memory_manager.get_user_id_from_username(chat_id, "Bob") == user_id_bob
+
+    # Non-existent username should return None
+    assert memory_manager.get_user_id_from_username(chat_id, "Charlie") is None
+
+    # Different chat should have separate mappings
+    assert memory_manager.get_user_id_from_username(99999, "Alice") is None
+
+
+def test_username_mapping_updates_on_multiple_messages():
+    """Test that username mapping is updated if user changes username."""
+    memory_manager = MemoryManager(auto_save=False, explicit_optin_mode=False)
+
+    chat_id = 12345
+    user_id = 111
+
+    # User sends message with first username
+    memory_manager.append_history(
+        chat_id,
+        "OldName: First message",
+        user_id=user_id,
+        is_group_chat=True,
+        username="OldName",
+    )
+
+    assert memory_manager.get_user_id_from_username(chat_id, "OldName") == user_id
+
+    # Same user sends message with new username
+    memory_manager.append_history(
+        chat_id,
+        "NewName: Second message",
+        user_id=user_id,
+        is_group_chat=True,
+        username="NewName",
+    )
+
+    # Both mappings should exist
+    assert memory_manager.get_user_id_from_username(chat_id, "OldName") == user_id
+    assert memory_manager.get_user_id_from_username(chat_id, "NewName") == user_id
+
+
+def test_username_mapping_persistence(tmp_path: Path):
+    """Test that username to user_id mapping persists across restarts."""
+    storage_path = tmp_path / "test_username_mapping.json"
+
+    # Create manager and store messages with usernames
+    manager1 = MemoryManager(
+        storage_path=storage_path,
+        auto_save=True,
+        explicit_optin_mode=False,
+    )
+
+    chat_id = 12345
+    user_id_alice = 111
+    user_id_bob = 222
+
+    manager1.append_history(
+        chat_id,
+        "Alice: Hello",
+        user_id=user_id_alice,
+        is_group_chat=True,
+        username="Alice",
+    )
+    manager1.append_history(
+        chat_id,
+        "Bob: Hi",
+        user_id=user_id_bob,
+        is_group_chat=True,
+        username="Bob",
+    )
+
+    # Verify mappings exist
+    assert manager1.get_user_id_from_username(chat_id, "Alice") == user_id_alice
+    assert manager1.get_user_id_from_username(chat_id, "Bob") == user_id_bob
+
+    # Create new manager and load data
+    manager2 = MemoryManager(
+        storage_path=storage_path,
+        auto_save=False,
+        explicit_optin_mode=False,
+    )
+
+    # Verify mappings were persisted
+    assert manager2.get_user_id_from_username(chat_id, "Alice") == user_id_alice
+    assert manager2.get_user_id_from_username(chat_id, "Bob") == user_id_bob
+
+
+def test_username_mapping_without_username_parameter():
+    """Test that messages without username parameter don't break mapping."""
+    memory_manager = MemoryManager(auto_save=False, explicit_optin_mode=False)
+
+    chat_id = 12345
+    user_id = 111
+
+    # Store message without username parameter
+    memory_manager.append_history(
+        chat_id,
+        "User: Hello",
+        user_id=user_id,
+        is_group_chat=True,
+        username=None,
+    )
+
+    # Should not create any mapping
+    assert memory_manager.get_user_id_from_username(chat_id, "User") is None
+
+    # History should still be stored
+    history = memory_manager.get_history(chat_id)
+    assert len(history) == 1
+
+
+def test_username_mapping_with_summarization():
+    """Test that username mapping works correctly for summarization workflow."""
+    memory_manager = MemoryManager(auto_save=False, explicit_optin_mode=True)
+
+    chat_id = 12345
+    user_id_alice = 111
+    user_id_bob = 222
+    next_ts = next_timestamp_generator()
+
+    # Users opt in
+    memory_manager.add_optin_user(chat_id, user_id_alice)
+    memory_manager.add_optin_user(chat_id, user_id_bob)
+
+    # Store messages with usernames (simulating normal bot flow)
+    memory_manager.append_history(
+        chat_id,
+        "Alice: I love Python",
+        user_id=user_id_alice,
+        is_group_chat=True,
+        username="Alice",
+    )
+    memory_manager.append_history(
+        chat_id,
+        "Bob: Me too!",
+        user_id=user_id_bob,
+        is_group_chat=True,
+        username="Bob",
+    )
+
+    # Simulate summarization: LLM returns summaries keyed by username
+    # Now we can look up user_id from username
+    alice_user_id = memory_manager.get_user_id_from_username(chat_id, "Alice")
+    bob_user_id = memory_manager.get_user_id_from_username(chat_id, "Bob")
+
+    assert alice_user_id == user_id_alice
+    assert bob_user_id == user_id_bob
+
+    # Store summaries with correct user_ids
+    result1 = memory_manager.add_user_summary(
+        chat_id,
+        user_id=alice_user_id,
+        username="Alice",
+        summary="Discussed Python",
+        last_active=next_ts(),
+        is_group_chat=True,
+    )
+    result2 = memory_manager.add_user_summary(
+        chat_id,
+        user_id=bob_user_id,
+        username="Bob",
+        summary="Agreed with Alice",
+        last_active=next_ts(),
+        is_group_chat=True,
+    )
+
+    assert result1 is True
+    assert result2 is True
+
+    # Verify summaries were stored with correct user_ids
+    summaries = memory_manager.get_user_summaries(chat_id)
+    assert len(summaries) == 2
+
+    # Find Alice's summary and verify user_id
+    alice_summary = next(s for s in summaries if s.username == "Alice")
+    assert alice_summary.user_id == user_id_alice
+
+    bob_summary = next(s for s in summaries if s.username == "Bob")
+    assert bob_summary.user_id == user_id_bob

@@ -155,6 +155,9 @@ class MemoryManager:
         self._optin_message_ids: Dict[
             int, int
         ] = {}  # chat_id -> message_id of opt-in request
+        self._username_to_userid: Dict[
+            int, Dict[str, int]
+        ] = {}  # chat_id -> {username -> user_id}
         self._max_summarized_users = max_summarized_users
         self._explicit_optin_mode = explicit_optin_mode
         self._storage_path = Path(storage_path or Path.home() / ".tbot-data.json")
@@ -186,6 +189,7 @@ class MemoryManager:
         message: str,
         user_id: int | None = None,
         is_group_chat: bool = False,
+        username: str | None = None,
     ) -> bool:
         """Append a message to chat history.
 
@@ -194,6 +198,7 @@ class MemoryManager:
             message: The formatted message text
             user_id: The user who sent the message (None for bot messages)
             is_group_chat: Whether this is a group/supergroup chat
+            username: The username of the sender (for tracking user_id mapping)
 
         Returns:
             True if message was stored, False if rejected due to opt-in policy
@@ -206,6 +211,12 @@ class MemoryManager:
                     f"in chat {chat_id}"
                 )
                 return False
+
+        # Track username -> user_id mapping for summarization
+        if user_id is not None and username is not None:
+            if chat_id not in self._username_to_userid:
+                self._username_to_userid[chat_id] = {}
+            self._username_to_userid[chat_id][username] = user_id
 
         history = self._history.setdefault(chat_id, [])
         history_msg = HistoryMessage(
@@ -524,6 +535,18 @@ class MemoryManager:
         """
         return self._optin_lists.get(chat_id, set()).copy()
 
+    def get_user_id_from_username(self, chat_id: int, username: str) -> int | None:
+        """Get user_id from username mapping.
+
+        Args:
+            chat_id: The chat ID
+            username: The username to look up
+
+        Returns:
+            The user_id if found, otherwise None
+        """
+        return self._username_to_userid.get(chat_id, {}).get(username)
+
     def remove_user_from_optin(self, chat_id: int, user_id: int) -> None:
         """Remove a user from opt-in list and purge their data.
 
@@ -651,8 +674,13 @@ class MemoryManager:
                 str(k): v for k, v in self._optin_message_ids.items()
             }
 
+            # Convert username to user_id mapping to serializable format
+            username_to_userid_data = {}
+            for chat_id, mapping in self._username_to_userid.items():
+                username_to_userid_data[str(chat_id)] = mapping
+
             data = {
-                "version": 5,  # Version 5: HistoryMessage structure + user_id in UserSummary
+                "version": 5,  # Version 5: HistoryMessage structure + user_id in UserSummary + username mapping
                 "memories": memories_data,
                 "history": history_data,
                 "summarization_count": summarization_data,
@@ -660,6 +688,7 @@ class MemoryManager:
                 "statistics": statistics_data,
                 "optin_lists": optin_lists_data,
                 "optin_message_ids": optin_message_ids_data,
+                "username_to_userid": username_to_userid_data,
             }
 
             # Write atomically using a temp file
@@ -783,6 +812,13 @@ class MemoryManager:
                     "optin_message_ids", {}
                 ).items():
                     self._optin_message_ids[int(chat_id_str)] = message_id
+
+            # Load username to user_id mapping (version 5+)
+            self._username_to_userid = {}
+            if version >= 5:
+                for chat_id_str, mapping in data.get("username_to_userid", {}).items():
+                    chat_id = int(chat_id_str)
+                    self._username_to_userid[chat_id] = mapping
 
             self._dirty = False
             logger.info(
