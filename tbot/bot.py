@@ -99,6 +99,7 @@ async def _maybe_auto_summarize(
     config: BotConfig,
     memory_manager: MemoryManager,
     llm_client: LLMClient,
+    is_group_chat: bool = False,
 ) -> None:
     """Check if history should be summarized and perform summarization if needed.
 
@@ -107,6 +108,7 @@ async def _maybe_auto_summarize(
         config: Bot configuration
         memory_manager: Memory manager instance
         llm_client: LLM client for generating summaries
+        is_group_chat: Whether this is a group/supergroup chat
     """
     # Check if auto-summarization is enabled
     if not config.auto_summarize_enabled:
@@ -148,8 +150,15 @@ async def _maybe_auto_summarize(
             clean_summary = ConversationContextBuilder.strip_bot_prefix(summary)
             # TODO: Could be improved by taking server side timestamp?
             last_active = datetime.utcnow()
+            # TODO: Track username to user_id mapping to use real user_id here
+            # For now, use 0 as placeholder (matches migration logic)
             memory_manager.add_user_summary(
-                chat_id, username, clean_summary, last_active
+                chat_id,
+                user_id=0,  # Placeholder until we track username->user_id mapping
+                username=username,
+                summary=clean_summary,
+                last_active=last_active,
+                is_group_chat=is_group_chat,
             )
             logger.debug(f"Stored summary for user {username}: {clean_summary[:50]}...")
 
@@ -176,10 +185,13 @@ def create_application(
     """Create the Telegram application with handlers wired in."""
 
     config_manager = config_manager or ConfigManager()
-    # Create memory manager with max_summarized_users from config
+    # Create memory manager with max_summarized_users and explicit_optin_mode from config
     if memory_manager is None:
         config = config_manager.config
-        memory_manager = MemoryManager(max_summarized_users=config.max_summarized_users)
+        memory_manager = MemoryManager(
+            max_summarized_users=config.max_summarized_users,
+            explicit_optin_mode=config.explicit_optin,
+        )
     resolved_api_key = api_key or os.getenv("API_KEY")
     llm_client = llm_client or LLMClient.fromParams(api_key=resolved_api_key)
 
@@ -519,24 +531,28 @@ def create_application(
 
         # Check explicit opt-in if enabled in group chats
         is_group_chat = update.effective_chat.type in ["group", "supergroup"]
-        if config.explicit_optin and is_group_chat:
-            # Check if user has opted in
-            user_id = update.effective_user.id if update.effective_user else None
-            if user_id and not memory_manager.is_user_opted_in(chat_id, user_id):
-                # User has not opted in, don't process their message
-                logger.debug(
-                    f"User {user_id} has not opted in to chat {chat_id}, ignoring message"
-                )
-                return
+        user_id = update.effective_user.id if update.effective_user else -1
 
         # Ensure consistent formatting for user messages in history
         user_name = "User"
         if update.effective_user and update.effective_user.first_name:
             user_name = update.effective_user.first_name
-        memory_manager.append_history(
+
+        # Gate-keep non opted users
+        if config.explicit_optin and not memory_manager.is_user_opted_in(
+            chat_id, user_id
+        ):
+            return
+
+        # Store user message with privacy enforcement at MemoryManager layer
+        if not memory_manager.append_history(
             chat_id,
             ConversationContextBuilder.format_user_message(user_name, text),
-        )
+            user_id=user_id,
+            is_group_chat=is_group_chat,
+        ):
+            return
+
         bot_user = context.bot if hasattr(context, "bot") else None
         replied_to_bot = False
         mentioned_bot = False
@@ -618,7 +634,9 @@ def create_application(
 
         # Notify - something brewing
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-        history = memory_manager.get_history(chat_id, config.max_context_messages)
+        history = memory_manager.get_history(
+            chat_id, config.max_context_messages, is_group_chat=is_group_chat
+        )
         memories = memory_manager.get_memories(chat_id)
         user_summaries = memory_manager.get_user_summaries(chat_id)
 
@@ -665,9 +683,12 @@ def create_application(
                 )
 
                 # Store full reply in history with prefix (for proper history processing)
+                # Bot messages have user_id=None
                 memory_manager.append_history(
                     chat_id,
                     ConversationContextBuilder.format_bot_message(clean_reply),
+                    user_id=None,
+                    is_group_chat=is_group_chat,
                 )
                 # Track reply in statistics
                 memory_manager.increment_reply_count(chat_id)
@@ -683,6 +704,7 @@ def create_application(
                 config=config,
                 memory_manager=memory_manager,
                 llm_client=llm_client,
+                is_group_chat=is_group_chat,
             )
         except Exception as e:
             logger.error(f"Failed to generate reply for chat {chat_id}: {e}")
