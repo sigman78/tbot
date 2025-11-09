@@ -7,14 +7,14 @@ import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, cast
 
 from openai import OpenAI, OpenAIError
 from openai.types.chat import ChatCompletionMessageParam
 
 from .config import BotConfig
 from .const import TG_REACTIONS as COMMON_REACTIONS
-from .context import ConversationContextBuilder
+from .context import ChatMessage, ConversationContextBuilder
 from .memory import MemoryEntry, UserSummary
 
 logger = logging.getLogger(__name__)
@@ -132,10 +132,14 @@ class LLMClient:
             f"{len(messages)} messages in context"
         )
 
+        # Convert to OpenAI-specific type for API call
+        # ChatMessage is structurally compatible with ChatCompletionMessageParam
+        openai_messages = cast(List[ChatCompletionMessageParam], messages)
+
         # Log the request for debug purposes
         request_data = {
             "model": config.llm_model,
-            "messages": messages,
+            "messages": openai_messages,
             "temperature": DEFAULT_TEMPERATURE,
             "max_tokens": DEFAULT_MAX_TOKENS,
         }
@@ -145,7 +149,7 @@ class LLMClient:
             try:
                 response = self._client.chat.completions.create(
                     model=config.llm_model,
-                    messages=messages,
+                    messages=openai_messages,
                     temperature=DEFAULT_TEMPERATURE,
                     max_tokens=DEFAULT_MAX_TOKENS,
                 )

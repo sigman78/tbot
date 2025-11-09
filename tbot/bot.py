@@ -7,7 +7,7 @@ import logging
 import os
 import random
 
-from telegram import Message, ReactionTypeEmoji, Update
+from telegram import Message, Update
 from telegram.constants import ChatAction, ChatMemberStatus, ParseMode
 from telegram.ext import (
     Application,
@@ -26,6 +26,7 @@ from .context import ConversationContextBuilder
 from .llm_client import LLMClient
 from .logic import should_respond
 from .memory import MemoryManager
+from .telegram_types import extract_emojis_from_reactions
 
 logger = logging.getLogger(__name__)
 
@@ -439,16 +440,16 @@ def create_application(
         if not new_reactions:
             return
 
-        # Check if any of the new reactions are positive
-        for reaction in new_reactions:
-            match reaction:
-                case ReactionTypeEmoji(emoji=emoji):
-                    if emoji in POSITIVE_REACTIONS:
-                        if user and user.id:
-                            memory_manager.add_optin_user(chat_id, user.id)
-                            logger.info(
-                                f"User {user.id} ({user.first_name}) opted in to chat {chat_id}"
-                            )
+        # Extract emoji strings from reactions (filters out non-emoji reactions)
+        emojis = extract_emojis_from_reactions(new_reactions)
+
+        # Check if any of the new emojis are positive
+        if any(emoji in POSITIVE_REACTIONS for emoji in emojis):
+            if user and user.id:
+                memory_manager.add_optin_user(chat_id, user.id)
+                logger.info(
+                    f"User {user.id} ({user.first_name}) opted in to chat {chat_id}"
+                )
 
     async def handle_ask_optin(
         update: Update, context: ContextTypes.DEFAULT_TYPE
